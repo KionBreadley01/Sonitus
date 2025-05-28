@@ -1,0 +1,33 @@
+name: sonitus_music
+description: Control de música para smartwatch en Flutter con conexión Bluetooth
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  just_audio: ^0.9.34
+  audio_session: ^0.1.6
+  provider: ^6.1.1
+  flutter_blue_plus: ^1.31.11
+  permission_handler: ^11.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: "^0.14.3"
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  chrome: true
+  image_path: "assets/images/Logo_Sonitus.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/audio/sample.mp3
+    - assets/images/Logo_Sonitus.PNG
