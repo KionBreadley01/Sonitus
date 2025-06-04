@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import 'package:sonitus_music/services/bluetooth_service.dart';
+
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
 
@@ -36,56 +37,60 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.dispose();
   }
 
-  Widget _controlButton(IconData icon, VoidCallback onPressed, {double size = 50}) {
-    return IconButton(
-      iconSize: size,
-      icon: Icon(icon),
-      onPressed: onPressed,
-      color: Colors.white,
-      padding: const EdgeInsets.all(12),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final bluetoothService = Provider.of<BluetoothService>(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reproductor'),
+        title: const Text('Música', style: TextStyle(fontSize: 22)),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.devices),
+            icon: const Icon(Icons.devices, size: 15),
             onPressed: () => Navigator.pushNamed(context, '/device'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.library_music),
-            onPressed: () => Navigator.pushNamed(context, '/library'),
           ),
         ],
       ),
-      body: SafeArea(
+      body: Padding(
+        padding: const EdgeInsets.all(8),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            const Icon(Icons.music_note, size: 100),
+            // Se ha eliminado el Icon(Icons.music_note)
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _controlButton(Icons.skip_previous, () {}),
-                const SizedBox(width: 20),
-                _controlButton(
-                    _isPlaying ? Icons.pause : Icons.play_arrow, _togglePlayPause,
-                    size: 80),
-                const SizedBox(width: 20),
-                _controlButton(Icons.skip_next, () {}),
+                IconButton(
+                  icon: const Icon(Icons.skip_previous,
+                      size: 45), // Reducido de 18 a 16
+                  onPressed: () {},
+                  padding: EdgeInsets.zero,
+                ),
+                const SizedBox(width: 6), // Reducido el espacio entre botones
+                IconButton(
+                  icon: Icon(
+                    _isPlaying ? Icons.pause : Icons.play_arrow,
+                    size: 30, // Reducido de 30 a 22
+                  ),
+                  onPressed: _togglePlayPause,
+                  padding: EdgeInsets.zero,
+                ),
+                const SizedBox(width: 6), // Reducido el espacio entre botones
+                IconButton(
+                  icon: const Icon(Icons.skip_next,
+                      size: 45), // Corregido de 100 a 16
+                  onPressed: () {},
+                  padding: EdgeInsets.zero,
+                ),
               ],
             ),
-            if (bluetoothService.isConnected)
-              Text('Conectado a ${bluetoothService.connectedDevice?.name ?? 'dispositivo'}',
-                  style: const TextStyle(fontSize: 14))
-            else
-              const Text('No conectado', style: TextStyle(fontSize: 14)),
+            Text(
+              bluetoothService.isConnected
+                  ? 'BT: ${bluetoothService.connectedDevice?.name?.substring(0, 8) ?? 'Conectado'}'
+                  : 'Sin conexión',
+              style: const TextStyle(fontSize: 10),
+            ),
           ],
         ),
       ),

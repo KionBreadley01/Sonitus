@@ -7,33 +7,38 @@ class LibraryScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Biblioteca'),
+        title: const Text('Biblioteca', style: TextStyle(fontSize: 14)),
+        centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Recientes', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            Container(
-              width: double.infinity,
-              height: 100,
-              color: Colors.grey[900],
-              child: const Center(child: Text('Aquí irán tus canciones recientes')),
-            ),
-            const SizedBox(height: 40),
-            const Text('Me gusta', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            Container(
-              width: double.infinity,
-              height: 100,
-              color: Colors.grey[900],
-              child: const Center(child: Text('Aquí irán tus favoritas')),
-            ),
-          ],
-        ),
+      body: ListView(
+        padding: const EdgeInsets.all(8),
+        children: [
+          _buildSection('Recientes'),
+          const SizedBox(height: 4),
+          _buildMusicCard(),
+          const SizedBox(height: 8),
+          _buildSection('Favoritas'),
+          const SizedBox(height: 4),
+          _buildMusicCard(),
+        ],
       ),
+    );
+  }
+
+  Widget _buildSection(String title) {
+    return Text(title,
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold));
+  }
+
+  Widget _buildMusicCard() {
+    return Container(
+      height: 60,
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Center(
+          child: Text('Lista de canciones', style: TextStyle(fontSize: 10))),
     );
   }
 }

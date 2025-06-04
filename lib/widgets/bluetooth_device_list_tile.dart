@@ -14,17 +14,22 @@ class BluetoothDeviceListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.devices),
-      title: Text(device.name.isNotEmpty ? device.name : 'Dispositivo desconocido'),
-      subtitle: Text(device.id.toString()),
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      leading: const Icon(Icons.devices, size: 16),
+      title: Text(
+        device.name.isNotEmpty ? device.name : 'Desconocido',
+        style: const TextStyle(fontSize: 12),
+        maxLines: 1,
+      ),
       trailing: StreamBuilder<blue.BluetoothConnectionState>(
         stream: device.connectionState,
-        initialData: blue.BluetoothConnectionState.disconnected,
         builder: (c, snapshot) {
           return Icon(
             snapshot.data == blue.BluetoothConnectionState.connected
                 ? Icons.bluetooth_connected
                 : Icons.bluetooth,
+            size: 16,
             color: snapshot.data == blue.BluetoothConnectionState.connected
                 ? Colors.green
                 : Colors.grey,
