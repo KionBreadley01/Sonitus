@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { Upload, Play, Pause, SkipBack, SkipForward, Music2, Volume2, ListMusic, Maximize2, Minimize2, Eye, EyeOff, X, Trash2, Menu, Search, ChevronDown } from "lucide-react";
+import { Upload, Play, Pause, SkipBack, SkipForward, Music2, Volume2, ListMusic, Maximize2, Minimize2, Eye, EyeOff, X, Trash2, Menu, Search, ChevronDown, Heart } from "lucide-react";
 import { Visualizer, VisualMode } from "@/components/Visualizer";
 import { cn } from "@/lib/utils";
 import { get, set } from "idb-keyval";
@@ -38,8 +38,11 @@ const Index = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const jsmediatagsRef = useRef<any>(null);
   const shouldPlayRef = useRef(false);
+  const restoredTimeRef = useRef<number>(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [fractalOverride, setFractalOverride] = useState<number | null>(null);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [sidebarTab, setSidebarTab] = useState<"all" | "favorites">("all");
 
   useEffect(() => {
     // Load previously saved tracks
@@ -47,16 +50,23 @@ const Index = () => {
       try {
         const savedTracks = await get<Track[]>("music_tracks");
         const savedCurrent = await get<number>("music_current");
+        const savedTime = await get<number>("music_time");
+        const savedFavs = await get<string[]>("music_favorites");
         if (savedTracks && savedTracks.length > 0) {
           const revived = savedTracks.map(t => ({
             ...t,
             url: URL.createObjectURL(t.file)
           }));
+          if (typeof savedTime === "number" && savedTime > 0) {
+            restoredTimeRef.current = savedTime;
+          }
           setTracks(revived);
-          // Restore last playing song index (clamped to valid range)
           if (typeof savedCurrent === "number" && savedCurrent < savedTracks.length) {
             setCurrent(savedCurrent);
           }
+        }
+        if (savedFavs) {
+          setFavorites(new Set(savedFavs));
         }
       } catch (err) {
         console.error("Failed to load saved tracks from IndexedDB", err);
@@ -162,6 +172,19 @@ const Index = () => {
     await set("music_tracks", []);
   };
 
+  const toggleFavorite = (trackName: string) => {
+    setFavorites(prev => {
+      const next = new Set(prev);
+      if (next.has(trackName)) {
+        next.delete(trackName);
+      } else {
+        next.add(trackName);
+      }
+      set("music_favorites", Array.from(next));
+      return next;
+    });
+  };
+
   const togglePlay = () => {
     if (!audioRef.current || !tracks.length) return;
     ensureCtx();
@@ -172,6 +195,8 @@ const Index = () => {
   const skip = (dir: number) => {
     if (!tracks.length) return;
     shouldPlayRef.current = true; // always play after skip
+    restoredTimeRef.current = 0; // don't restore old position on a new track
+    set("music_time", 0);
     setCurrent((c) => (c + dir + tracks.length) % tracks.length);
   };
 
@@ -198,12 +223,27 @@ const Index = () => {
     audioRef.current.src = tracks[current].url;
     setProgress(0);
     setDuration(0);
+
+    // After metadata loads, seek to the saved position (only on first restore)
+    const handleMetadata = () => {
+      if (restoredTimeRef.current > 0 && audioRef.current) {
+        audioRef.current.currentTime = restoredTimeRef.current;
+        setProgress(restoredTimeRef.current);
+        restoredTimeRef.current = 0; // Clear so subsequent track changes don't seek
+      }
+    };
+    audioRef.current.addEventListener("loadedmetadata", handleMetadata, { once: true });
+
     // Use shouldPlayRef OR current playing state to decide whether to play
     if (playing || shouldPlayRef.current) {
       shouldPlayRef.current = false;
       ensureCtx();
       audioRef.current.play().catch(e => console.log("Autoplay prevented", e));
     }
+
+    return () => {
+      audioRef.current?.removeEventListener("loadedmetadata", handleMetadata);
+    };
   }, [current, tracks]);
 
   useEffect(() => {
@@ -340,7 +380,7 @@ const Index = () => {
                 Auto
               </button>
               <div className="w-[1px] h-4 bg-white/10 self-center mx-1" />
-              {[0, 1, 2, 3, 4, 5, 6].map((idx) => (
+              {Array.from({ length: 10 }, (_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setFractalOverride(idx)}
@@ -412,6 +452,21 @@ const Index = () => {
                       <p className="text-xs uppercase tracking-widest text-foreground/50 font-semibold mb-1">Reproduciendo</p>
                       <p className="font-bold text-foreground text-sm truncate w-48 md:w-64 lg:w-96">{currentTrack?.name}</p>
                     </div>
+                    {currentTrack && (
+                      <button
+                        onClick={() => toggleFavorite(currentTrack.name)}
+                        className="ml-1 p-1.5 rounded-full transition-all hover:scale-110"
+                        title={favorites.has(currentTrack.name) ? "Quitar de favoritos" : "Añadir a favoritos"}
+                      >
+                        <Heart
+                          className="w-5 h-5 transition-all"
+                          style={favorites.has(currentTrack.name)
+                            ? { fill: "#f43f5e", stroke: "#f43f5e", filter: "drop-shadow(0 0 6px #f43f5e99)" }
+                            : { stroke: "rgba(255,255,255,0.4)" }
+                          }
+                        />
+                      </button>
+                    )}
                   </div>
                   <label className="text-xs font-medium cursor-pointer text-foreground/70 hover:text-foreground flex items-center gap-1.5 transition">
                     <Upload className="w-4 h-4" /> Añadir
@@ -503,13 +558,36 @@ const Index = () => {
             />
             <span className="text-xl font-bold tracking-tight text-white drop-shadow-md">SONITUS</span>
           </div>
-          {/* Row 2 — Playlist label + hamburger close button */}
-          <div className="flex items-center justify-between px-5 pb-4">
-            <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
-              <ListMusic className="w-4 h-4 text-foreground/60" />
-              Playlist
-              <span className="text-xs text-foreground/40 font-normal ml-1">{tracks.length} pistas</span>
-            </h2>
+          {/* Row 2 — Tabs + close button */}
+          <div className="flex items-center justify-between px-5 pb-3">
+            <div className="flex gap-1 bg-foreground/5 rounded-xl p-1">
+              <button
+                onClick={() => setSidebarTab("all")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  sidebarTab === "all"
+                    ? "bg-foreground/15 text-foreground shadow-sm"
+                    : "text-foreground/50 hover:text-foreground"
+                )}
+              >
+                <ListMusic className="w-3.5 h-3.5" />
+                Todo
+                <span className="text-[10px] text-foreground/40">{tracks.length}</span>
+              </button>
+              <button
+                onClick={() => setSidebarTab("favorites")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  sidebarTab === "favorites"
+                    ? "bg-rose-500/20 text-rose-400 shadow-sm"
+                    : "text-foreground/50 hover:text-foreground"
+                )}
+              >
+                <Heart className={cn("w-3.5 h-3.5", sidebarTab === "favorites" && "fill-rose-400")} />
+                Favoritos
+                <span className="text-[10px] text-foreground/40">{favorites.size}</span>
+              </button>
+            </div>
             <Button
               variant="ghost"
               size="icon"
@@ -545,12 +623,15 @@ const Index = () => {
         <div className="flex-1 overflow-y-auto p-4 pt-0 space-y-2">
           {(() => {
             const q = searchQuery.trim().toLowerCase();
+            const base = sidebarTab === "favorites"
+              ? tracks.filter(t => favorites.has(t.name))
+              : tracks;
             const filtered = q
-              ? tracks.filter(t =>
+              ? base.filter(t =>
                 t.name.toLowerCase().includes(q) ||
                 (t.artist ?? "").toLowerCase().includes(q)
               )
-              : tracks;
+              : base;
             return (<>
               {filtered.length === 0 && q && (
                 <div className="text-center text-foreground/40 mt-8 text-sm">
@@ -558,15 +639,19 @@ const Index = () => {
                   No se encontraron resultados
                 </div>
               )}
+              {filtered.length === 0 && !q && sidebarTab === "favorites" && (
+                <div className="text-center text-foreground/40 mt-10 px-4">
+                  <Heart className="w-8 h-8 mx-auto mb-3 opacity-20" />
+                  <p className="text-sm font-medium">Sin favoritos aún</p>
+                  <p className="text-xs mt-1 opacity-70">Toca el corazón en una canción para añadirla.</p>
+                </div>
+              )}
               {filtered.map((t) => {
                 const i = tracks.indexOf(t);
+                const isFav = favorites.has(t.name);
                 return (
-                  <button
+                  <div
                     key={i}
-                    onClick={() => {
-                      shouldPlayRef.current = true;
-                      setCurrent(i);
-                    }}
                     className={cn(
                       "w-full flex items-center gap-3 p-3 rounded-xl transition-all text-left group",
                       i === current
@@ -574,30 +659,55 @@ const Index = () => {
                         : "hover:bg-foreground/5 border border-transparent"
                     )}
                   >
-                    {t.coverArt ? (
-                      <img src={t.coverArt} className="w-10 h-10 rounded-md object-cover shadow-sm border border-foreground/10" alt="" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-md bg-foreground/5 flex items-center justify-center border border-foreground/10">
-                        <Music2 className="w-4 h-4 text-foreground/40" />
+                    <button
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                      onClick={() => {
+                        shouldPlayRef.current = true;
+                        restoredTimeRef.current = 0;
+                        set("music_time", 0);
+                        setCurrent(i);
+                      }}
+                    >
+                      {t.coverArt ? (
+                        <img src={t.coverArt} className="w-10 h-10 rounded-md object-cover shadow-sm border border-foreground/10 shrink-0" alt="" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-md bg-foreground/5 flex items-center justify-center border border-foreground/10 shrink-0">
+                          <Music2 className="w-4 h-4 text-foreground/40" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className={cn("font-medium text-sm truncate", i === current ? "text-foreground" : "text-foreground/80 group-hover:text-foreground")}>
+                          {t.name}
+                        </p>
+                        <p className="text-xs text-foreground/50 truncate">{t.artist}</p>
                       </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className={cn("font-medium text-sm truncate", i === current ? "text-foreground" : "text-foreground/80 group-hover:text-foreground")}>
-                        {t.name}
-                      </p>
-                      <p className="text-xs text-foreground/50 truncate">{t.artist}</p>
+                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {i === current && playing && (
+                        <div className="w-4 h-4 flex items-end justify-between gap-[2px] mr-1">
+                          <div className="w-1 animate-[bounce_1s_infinite] rounded-full h-full" style={{ backgroundColor: "hsl(190,100%,55%)" }}></div>
+                          <div className="w-1 animate-[bounce_1s_infinite_0.2s] rounded-full h-3/4" style={{ backgroundColor: "hsl(270,100%,65%)" }}></div>
+                          <div className="w-1 animate-[bounce_1s_infinite_0.4s] rounded-full h-full" style={{ backgroundColor: "hsl(320,100%,60%)" }}></div>
+                        </div>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleFavorite(t.name); }}
+                        className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all hover:scale-110"
+                        title={isFav ? "Quitar de favoritos" : "Añadir a favoritos"}
+                      >
+                        <Heart
+                          className="w-4 h-4 transition-all"
+                          style={isFav
+                            ? { fill: "#f43f5e", stroke: "#f43f5e", opacity: 1, filter: "drop-shadow(0 0 4px #f43f5e99)" }
+                            : { stroke: "rgba(255,255,255,0.5)" }
+                          }
+                        />
+                      </button>
                     </div>
-                    {i === current && playing && (
-                      <div className="w-4 h-4 flex items-end justify-between gap-[2px]">
-                        <div className="w-1 animate-[bounce_1s_infinite] rounded-full h-full" style={{ backgroundColor: "hsl(190,100%,55%)" }}></div>
-                        <div className="w-1 animate-[bounce_1s_infinite_0.2s] rounded-full h-3/4" style={{ backgroundColor: "hsl(270,100%,65%)" }}></div>
-                        <div className="w-1 animate-[bounce_1s_infinite_0.4s] rounded-full h-full" style={{ backgroundColor: "hsl(320,100%,60%)" }}></div>
-                      </div>
-                    )}
-                  </button>
+                  </div>
                 );
               })}
-              {tracks.length === 0 && (
+              {tracks.length === 0 && sidebarTab === "all" && (
                 <div className="text-center text-foreground/40 mt-10">
                   <p>No hay canciones.</p>
                   <p className="text-sm">Añade algunas para empezar.</p>
@@ -621,7 +731,14 @@ const Index = () => {
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => skip(1)}
-        onTimeUpdate={(e) => setProgress((e.target as HTMLAudioElement).currentTime)}
+        onTimeUpdate={(e) => {
+          const t = (e.target as HTMLAudioElement).currentTime;
+          setProgress(t);
+          // Persist current time every ~5 seconds to avoid excessive writes
+          if (Math.round(t) % 5 === 0) {
+            set("music_time", t);
+          }
+        }}
         onLoadedMetadata={(e) => setDuration((e.target as HTMLAudioElement).duration)}
         crossOrigin="anonymous"
       />

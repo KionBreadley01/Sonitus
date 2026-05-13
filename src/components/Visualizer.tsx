@@ -151,6 +151,11 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
 
       // ─── BARS — Segmented LED style ────────────────────────────────────
       if (mode === "bars") {
+        const renderers = [
+          () => {}, () => {}, () => {}, () => {}, () => {},
+          () => {}, () => {}, () => {}, () => {}, () => {},
+          () => {}, () => {}, () => {}
+        ];
         const bars = 64;                       // number of bar columns
         const step = Math.floor(bufLen / bars);
         const barW = (w / bars) * 0.72;        // bar column width
@@ -744,7 +749,7 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
         
         // --- RANDOMIZED MULTI-FRACTAL SYSTEM ---
         const cycleLength = 12; // 12 seconds per fractal shape (updated from 5)
-        const totalFractals = 7;
+        const totalFractals = 10;
         
         // Use time and a random offset to compute pseudo-random transitions
         const currentCycleId = Math.floor(time / cycleLength) + randomOffsetRef.current;
@@ -1094,8 +1099,307 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                      }
                  }
              }
-             ctx.globalCompositeOperation = "source-over"; 
-          }
+              ctx.globalCompositeOperation = "source-over"; 
+          },
+
+          // 8. Dragon Curve ULTRA — multi-layer morphing dragon with audio plasma
+          (alpha) => {
+            ctx.globalAlpha = alpha;
+            ctx.globalCompositeOperation = "lighter";
+            const phase = (time % cycleLength) / cycleLength;
+            const iters = 13; // One more iteration = 2x complexity
+            // Bass makes the segments longer — more explosive, fills the screen
+            const len = minD * 0.0028 * (1 + bp * 0.8 + tp * 0.3);
+            // The curve's angle morphs over time for organic flow
+            const turn = (Math.PI / 2) * (1 + Math.sin(time * 0.4) * 0.2 + mp * 0.1);
+
+            const buildSeq = () => {
+              const seq: number[] = [1];
+              for (let i = 0; i < iters; i++) {
+                const copy = [...seq].reverse().map(v => -v);
+                seq.push(1, ...copy);
+              }
+              return seq;
+            };
+            const seq = buildSeq();
+
+            // Draw 3 layered dragon curves offset in angle for a "triple helix" look
+            const layers = 3;
+            for (let layer = 0; layer < layers; layer++) {
+              const layerHue = dynHue(BH + layer * 120 + time * 30);
+              const layerAlpha = (0.5 + bp * 0.4) * (1 - layer * 0.2);
+              // Each layer starts at a slightly different angle + position
+              let x = (-minD * 0.12) + layer * minD * 0.04;
+              let y = (minD * 0.08) - layer * minD * 0.04;
+              let angle = phase * Math.PI * 2 + time * (0.25 + layer * 0.05) + layer * (Math.PI * 2 / layers);
+
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+              for (const s of seq) {
+                x += Math.cos(angle) * len;
+                y += Math.sin(angle) * len;
+                ctx.lineTo(x, y);
+                angle += s * turn;
+              }
+              ctx.strokeStyle = `hsla(${layerHue}, 100%, 70%, ${layerAlpha * alpha})`;
+              ctx.lineWidth = (2.5 - layer * 0.6) + bp * 2.5;
+              ctx.shadowBlur = (20 + bp * 35) * (1 - layer * 0.2);
+              ctx.shadowColor = `hsl(${layerHue}, 100%, 65%)`;
+              ctx.stroke();
+            }
+
+            // Audio-reactive "node bursts" along curve midpoints on strong bass
+            if (bp > 0.5) {
+              const burstCount = 5;
+              for (let b2 = 0; b2 < burstCount; b2++) {
+                const burstAngle = (b2 / burstCount) * Math.PI * 2 + time * 2;
+                const burstR = minD * 0.1 * bp;
+                const bx = Math.cos(burstAngle) * burstR;
+                const by = Math.sin(burstAngle) * burstR;
+                const bHue = dynHue(BH + b2 * 72 + time * 40);
+                const bGrad = ctx.createRadialGradient(bx, by, 0, bx, by, minD * 0.04 * bp);
+                bGrad.addColorStop(0, `hsla(${bHue}, 100%, 90%, ${bp * alpha})`);
+                bGrad.addColorStop(1, `hsla(${bHue}, 100%, 50%, 0)`);
+                ctx.beginPath();
+                ctx.arc(bx, by, minD * 0.04 * bp, 0, Math.PI * 2);
+                ctx.fillStyle = bGrad;
+                ctx.fill();
+              }
+            }
+            ctx.shadowBlur = 0;
+            ctx.globalCompositeOperation = "source-over";
+          },
+
+
+          // 8b. Clifford Attractor REBORN — supercharged with density layers & audio pulse
+          (alpha) => {
+            ctx.globalAlpha = alpha;
+            ctx.globalCompositeOperation = "lighter";
+
+            // Parameters morph over time to create visual phase transitions
+            const a = -1.7 + Math.sin(time * 0.11) * 0.5 + bp * 0.3;
+            const b = 1.3 + Math.cos(time * 0.13) * 0.5 + mp * 0.2;
+            const c = -0.9 + Math.sin(time * 0.17) * 0.5;
+            const d2 = -1.2 + Math.cos(time * 0.09) * 0.5 + tp * 0.2;
+            // Scale pulses with bass
+            const sc = minD * (0.2 + bp * 0.06);
+
+            let x2 = 0.1, y2 = 0;
+            const pts2 = 8000; // More points = richer density
+
+            // Pre-run to settle the attractor
+            for (let i = 0; i < 200; i++) {
+              const nx2 = Math.sin(a * y2) + c * Math.cos(a * x2);
+              const ny2 = Math.sin(b * x2) + d2 * Math.cos(b * y2);
+              x2 = nx2; y2 = ny2;
+            }
+
+            for (let i = 0; i < pts2; i++) {
+              const nx2 = Math.sin(a * y2) + c * Math.cos(a * x2);
+              const ny2 = Math.sin(b * x2) + d2 * Math.cos(b * y2);
+              x2 = nx2; y2 = ny2;
+
+              const px = x2 * sc;
+              const py = y2 * sc;
+
+              // Multi-band color: position in sequence drives hue cycling
+              const progress = i / pts2;
+              const hue = dynHue(H2 + progress * 280 + time * 22);
+              // Treble boosts brightness, bass boosts opacity
+              const bright = 55 + tp * 25 + bp * 15;
+              const opac = 0.025 + bp * 0.02 + tp * 0.015;
+              // Particle size reacts to bass — on beat they "swell"
+              const sz = 1.5 + bp * 2;
+
+              ctx.fillStyle = `hsla(${hue}, 100%, ${bright}%, ${opac})`;
+              ctx.fillRect(px - sz/2, py - sz/2, sz, sz);
+            }
+
+            // Glowing core aura pulsing with bass
+            const auraR = minD * 0.08 * (1 + bp * 1.2);
+            const aHue = dynHue(H2 + time * 15);
+            const aGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, auraR);
+            aGrad.addColorStop(0, `hsla(${aHue}, 100%, 80%, ${0.35 * bp * alpha})`);
+            aGrad.addColorStop(1, `hsla(${aHue}, 100%, 40%, 0)`);
+            ctx.beginPath();
+            ctx.arc(0, 0, auraR, 0, Math.PI * 2);
+            ctx.fillStyle = aGrad;
+            ctx.fill();
+
+            ctx.globalCompositeOperation = "source-over";
+          },
+
+          // 15. Golden Ratio Sunflower — phyllotaxis spiral with audio pulse and enhancements
+          (alpha) => {
+            ctx.globalAlpha = alpha;
+            const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+            const diag = Math.sqrt(w * w + h * h) / 2;
+            const originalMaxR = minD * 0.46;
+            const maxR = diag;
+            const seeds = Math.min(Math.floor(600 * (diag * diag) / (originalMaxR * originalMaxR)), 2000); // Cap to 2000 for performance
+            const phase2 = time * 0.6;
+
+            // 1. Cosmic Dust (Parallax Background) - Batched for performance
+            ctx.globalCompositeOperation = "lighter";
+            const dustCount = Math.min(Math.floor(150 * (diag * diag) / (originalMaxR * originalMaxR)), 400); // Cap to 400
+            
+            ctx.fillStyle = `hsla(200, 50%, 80%, ${0.2 * alpha})`;
+            ctx.beginPath();
+            for(let i=0; i<dustCount; i++) {
+                const a = i * 2.13 + time * 0.1 * (i % 3 - 1);
+                const r = Math.sqrt(i / dustCount) * diag;
+                const px = Math.cos(a) * r;
+                const py = Math.sin(a) * r;
+                ctx.moveTo(px, py);
+                ctx.arc(px, py, 1, 0, Math.PI * 2);
+            }
+            ctx.fill();
+
+            // 2. Core Breathing Halo & Bass Reactor
+            ctx.globalCompositeOperation = "lighter";
+            const coreHue = dynHue(H3 + time * 10);
+            
+            // Soft background halo
+            const haloR = minD * 0.05 * (1 + bp * 0.5); 
+            const haloGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, haloR);
+            haloGrad.addColorStop(0, `hsla(${coreHue}, 100%, 80%, ${(0.4 + bp * 0.6) * alpha})`);
+            haloGrad.addColorStop(1, `hsla(${coreHue}, 100%, 50%, 0)`);
+            ctx.beginPath();
+            ctx.arc(0, 0, haloR, 0, Math.PI * 2);
+            ctx.fillStyle = haloGrad;
+            ctx.fill();
+
+            // The jagged "Energy Core" inside that reacts aggressively to bass
+            if (bp > 0.05) {
+                const spikes = 16;
+                ctx.beginPath();
+                for (let i = 0; i <= spikes; i++) {
+                    const spikeAngle = (i / spikes) * Math.PI * 2 + time * 5;
+                    const noise = Math.sin(spikeAngle * 6 + time * 20) * 0.5 + 0.5;
+                    const spikeR = minD * 0.015 + minD * 0.07 * bp * noise;
+                    if (i === 0) ctx.moveTo(Math.cos(spikeAngle) * spikeR, Math.sin(spikeAngle) * spikeR);
+                    else ctx.lineTo(Math.cos(spikeAngle) * spikeR, Math.sin(spikeAngle) * spikeR);
+                }
+                ctx.fillStyle = `hsla(${coreHue}, 100%, 90%, ${(0.5 + bp * 0.5) * alpha})`;
+                ctx.fill();
+                
+                // Super hot white center dot on extreme bass drops
+                ctx.beginPath();
+                ctx.arc(0, 0, minD * 0.01 * (1 + bp * 3), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${(bp) * alpha})`;
+                ctx.fill();
+            }
+            ctx.globalCompositeOperation = "source-over"; // Reset composite for outer ring
+
+            // 2.5 Inner Source Ring (Encierra el núcleo)
+            const innerRingR = minD * 0.08 * (1 + bp * 0.1); // Tight boundary around the core
+            ctx.beginPath();
+            ctx.arc(0, 0, innerRingR, 0, Math.PI * 2);
+            ctx.strokeStyle = `hsla(${coreHue}, 100%, 60%, ${(0.8 + bp * 0.5) * alpha})`;
+            ctx.lineWidth = 2 + tp * 3;
+            ctx.setLineDash([4, 4]); // Dashed ring
+            ctx.stroke();
+            ctx.setLineDash([]); // reset
+
+            // 3. Orbital Outer Ring (Mids Reactive)
+            const ringR = originalMaxR * (1.05 + mp * 0.2); // JUMPS WITH MIDS
+            ctx.beginPath();
+            ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+            ctx.strokeStyle = `hsla(${dynHue(H1 - time * 15)}, 80%, 50%, ${0.2 * alpha})`;
+            ctx.lineWidth = 2 + mp * 10; // THICKER WITH MIDS
+            ctx.setLineDash([4 + tp * 10, 8 + mp * 30]); // DASHES REACT TO TREBLE/MIDS
+            ctx.stroke();
+            ctx.setLineDash([]); // reset
+
+            // 4. Circular Equalizer Bars (El Clásico)
+            const eqBars = 180;
+            const eqBaseR = ringR + 10 + bp * 5; // Draw just outside the orbital ring, jumps with bass
+            ctx.globalCompositeOperation = "lighter";
+            for (let i = 0; i < eqBars; i++) {
+                // Get frequency data (spread across first half of buffer to capture mostly bass/mids)
+                const freqVal = fdata[Math.floor((i / eqBars) * (bufLen * 0.4))] / 255;
+                if (freqVal < 0.03) continue;
+                
+                const barAngle = (i / eqBars) * Math.PI * 2 - time * 0.4; // Slowly rotate backwards
+                const barLen = freqVal * minD * 0.25 * (1 + bp * 0.5); // Length based on frequency power
+                const x1 = Math.cos(barAngle) * eqBaseR;
+                const y1 = Math.sin(barAngle) * eqBaseR;
+                const x2 = Math.cos(barAngle) * (eqBaseR + barLen);
+                const y2 = Math.sin(barAngle) * (eqBaseR + barLen);
+                
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                
+                // Color gradient loops around the circle
+                const iHue = dynHue(H1 + (i / eqBars) * 360 + time * 15);
+                ctx.strokeStyle = `hsla(${iHue}, 100%, 65%, ${(0.3 + freqVal * 0.7) * alpha})`;
+                ctx.lineWidth = 1.5 + freqVal * 3;
+                ctx.lineCap = "round";
+                ctx.stroke();
+            }
+            ctx.lineCap = "butt"; // reset lineCap
+
+            // Main Sunflower (with Metamorphosis and Trails)
+            // Optimization: Use "lighter" instead of heavy shadowBlur for a natural glow effect
+            ctx.globalCompositeOperation = "lighter";
+            
+            for (let i = 0; i < seeds; i++) {
+              const t2 = i / seeds;
+              // BASS DEEPENS THE WAVE (Reduced intensity), MIDS TIGHTEN THE WAVE FREQUENCY
+              const r = Math.sqrt(t2) * maxR * (1 + bp * 0.15 * Math.sin(t2 * (10 + mp * 5) - time * 5));
+              
+              // Skip particles inside the inner ring to make it look like they emit FROM the ring
+              if (r < innerRingR) continue;
+
+              // BASS ADDS ROTATIONAL TWITCH. Angle based on original i maintains pattern
+              const angle = i * goldenAngle + phase2 + bp * 0.1 * Math.sin(t2 * 20);
+              const px = Math.cos(angle) * r;
+              const py = Math.sin(angle) * r;
+              
+              const relR = r / originalMaxR;
+              // TREBLE AND BASS MAKE PARTICLES MUCH LARGER
+              const size = (2.0 + tp * 8 + bp * 3) * Math.max(0.2, 1 - relR * 0.6);
+              // COLOR SHIFTS WITH MIDS
+              const hue = dynHue(H3 + relR * (220 + mp * 100) + time * 20); 
+              
+              ctx.beginPath();
+              
+              // METAMORPHOSIS PUSHES INWARD WITH BASS
+              if (r > originalMaxR * (0.65 - bp * 0.3)) {
+                 // Spiky shapes rotate faster with treble
+                 const rot = angle + time * (1 + tp * 2); 
+                 ctx.moveTo(px + Math.cos(rot) * size * 1.5, py + Math.sin(rot) * size * 1.5);
+                 ctx.lineTo(px + Math.cos(rot + Math.PI/2) * size * 0.5, py + Math.sin(rot + Math.PI/2) * size * 0.5);
+                 ctx.lineTo(px + Math.cos(rot + Math.PI) * size * 1.5, py + Math.sin(rot + Math.PI) * size * 1.5);
+                 ctx.lineTo(px + Math.cos(rot - Math.PI/2) * size * 0.5, py + Math.sin(rot - Math.PI/2) * size * 0.5);
+                 ctx.closePath();
+              } else {
+                 // Inner seeds stay as circles
+                 ctx.arc(px, py, size, 0, Math.PI * 2);
+              }
+              
+              // OPACITY BOOSTS WITH BASS AND TREBLE
+              ctx.fillStyle = `hsla(${hue}, 90%, 65%, ${(0.4 + bp * 0.4 + tp * 0.2) * alpha})`;
+              ctx.fill();
+
+              // TRAILS PUSH INWARD AND GET LONGER WITH AUDIO
+              if (r > originalMaxR * (0.8 - bp * 0.2)) {
+                  const trailLength = 0.05 + tp * 0.4 + bp * 0.1;
+                  const trailAngle = angle - trailLength;
+                  const pxTrail = Math.cos(trailAngle) * r;
+                  const pyTrail = Math.sin(trailAngle) * r;
+                  ctx.beginPath();
+                  ctx.moveTo(px, py);
+                  ctx.lineTo(pxTrail, pyTrail);
+                  ctx.strokeStyle = `hsla(${hue}, 90%, 65%, ${(0.2 + tp * 0.3) * alpha})`;
+                  ctx.lineWidth = size * 0.5;
+                  ctx.stroke();
+              }
+            }
+            ctx.globalCompositeOperation = "source-over";
+          },
+
         ];
 
         // Render the active fractals with crossfade
