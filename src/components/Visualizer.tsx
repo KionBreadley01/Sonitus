@@ -53,6 +53,17 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
   const timeBufRef = useRef<Uint8Array | null>(null);
   const timeRef = useRef<number>(0);
   const randomOffsetRef = useRef<number>(Math.floor(Math.random() * 10000));
+  // Synced refs — loop reads these directly so it never needs to restart on prop changes
+  const modeRef = useRef(mode);
+  const playingRef = useRef(playing);
+  const analyserRef = useRef(analyser);
+  const fractalOverrideRef = useRef(fractalOverride);
+
+  // Keep refs in sync with props on every render
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { playingRef.current = playing; }, [playing]);
+  useEffect(() => { analyserRef.current = analyser; }, [analyser]);
+  useEffect(() => { fractalOverrideRef.current = fractalOverride ?? null; }, [fractalOverride]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -75,12 +86,28 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
     document.addEventListener("fullscreenchange", onFSChange);
 
     let frame = 0;
+    let isActive = true;
+    let lastTimestamp: number | null = null;
 
-    const draw = () => {
+    const draw = (timestamp: number) => {
+      if (!isActive) return;
       rafRef.current = requestAnimationFrame(draw);
-      timeRef.current += 0.012;
+
+      // Always render — never block on document.hidden.
+      // The 100ms cap prevents speed-jumps if the browser throttled RAF
+      // (e.g. returning from a background tab).
+      const dtMs = lastTimestamp === null ? 0 : Math.min(timestamp - lastTimestamp, 100);
+      lastTimestamp = timestamp;
+      // Scale: ~0.012 per frame at 60fps ≈ 0.72/s
+      timeRef.current += dtMs * 0.00072;
       const time = timeRef.current;
       frame++;
+
+      // Read live values from refs — no loop restart needed on prop change
+      const mode = modeRef.current;
+      const playing = playingRef.current;
+      const fractalOverride = fractalOverrideRef.current;
+      const analyser = analyserRef.current;
 
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
@@ -112,8 +139,8 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
         // Initialize time domain to silence (128)
         timeBufRef.current.fill(128);
       }
-      const fdata = freqBufRef.current!;
-      const tdata = timeBufRef.current!;
+      const fdata = freqBufRef.current as Uint8Array<ArrayBuffer>;
+      const tdata = timeBufRef.current as Uint8Array<ArrayBuffer>;
       
       if (playing) {
         analyser.getByteFrequencyData(fdata);
@@ -749,7 +776,7 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
         
         // --- RANDOMIZED MULTI-FRACTAL SYSTEM ---
         const cycleLength = 12; // 12 seconds per fractal shape (updated from 5)
-        const totalFractals = 10;
+        const totalFractals = 8;
         
         // Use time and a random offset to compute pseudo-random transitions
         const currentCycleId = Math.floor(time / cycleLength) + randomOffsetRef.current;
@@ -1102,133 +1129,6 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
               ctx.globalCompositeOperation = "source-over"; 
           },
 
-          // 8. Dragon Curve ULTRA — multi-layer morphing dragon with audio plasma
-          (alpha) => {
-            ctx.globalAlpha = alpha;
-            ctx.globalCompositeOperation = "lighter";
-            const phase = (time % cycleLength) / cycleLength;
-            const iters = 13; // One more iteration = 2x complexity
-            // Bass makes the segments longer — more explosive, fills the screen
-            const len = minD * 0.0028 * (1 + bp * 0.8 + tp * 0.3);
-            // The curve's angle morphs over time for organic flow
-            const turn = (Math.PI / 2) * (1 + Math.sin(time * 0.4) * 0.2 + mp * 0.1);
-
-            const buildSeq = () => {
-              const seq: number[] = [1];
-              for (let i = 0; i < iters; i++) {
-                const copy = [...seq].reverse().map(v => -v);
-                seq.push(1, ...copy);
-              }
-              return seq;
-            };
-            const seq = buildSeq();
-
-            // Draw 3 layered dragon curves offset in angle for a "triple helix" look
-            const layers = 3;
-            for (let layer = 0; layer < layers; layer++) {
-              const layerHue = dynHue(BH + layer * 120 + time * 30);
-              const layerAlpha = (0.5 + bp * 0.4) * (1 - layer * 0.2);
-              // Each layer starts at a slightly different angle + position
-              let x = (-minD * 0.12) + layer * minD * 0.04;
-              let y = (minD * 0.08) - layer * minD * 0.04;
-              let angle = phase * Math.PI * 2 + time * (0.25 + layer * 0.05) + layer * (Math.PI * 2 / layers);
-
-              ctx.beginPath();
-              ctx.moveTo(x, y);
-              for (const s of seq) {
-                x += Math.cos(angle) * len;
-                y += Math.sin(angle) * len;
-                ctx.lineTo(x, y);
-                angle += s * turn;
-              }
-              ctx.strokeStyle = `hsla(${layerHue}, 100%, 70%, ${layerAlpha * alpha})`;
-              ctx.lineWidth = (2.5 - layer * 0.6) + bp * 2.5;
-              ctx.shadowBlur = (20 + bp * 35) * (1 - layer * 0.2);
-              ctx.shadowColor = `hsl(${layerHue}, 100%, 65%)`;
-              ctx.stroke();
-            }
-
-            // Audio-reactive "node bursts" along curve midpoints on strong bass
-            if (bp > 0.5) {
-              const burstCount = 5;
-              for (let b2 = 0; b2 < burstCount; b2++) {
-                const burstAngle = (b2 / burstCount) * Math.PI * 2 + time * 2;
-                const burstR = minD * 0.1 * bp;
-                const bx = Math.cos(burstAngle) * burstR;
-                const by = Math.sin(burstAngle) * burstR;
-                const bHue = dynHue(BH + b2 * 72 + time * 40);
-                const bGrad = ctx.createRadialGradient(bx, by, 0, bx, by, minD * 0.04 * bp);
-                bGrad.addColorStop(0, `hsla(${bHue}, 100%, 90%, ${bp * alpha})`);
-                bGrad.addColorStop(1, `hsla(${bHue}, 100%, 50%, 0)`);
-                ctx.beginPath();
-                ctx.arc(bx, by, minD * 0.04 * bp, 0, Math.PI * 2);
-                ctx.fillStyle = bGrad;
-                ctx.fill();
-              }
-            }
-            ctx.shadowBlur = 0;
-            ctx.globalCompositeOperation = "source-over";
-          },
-
-
-          // 8b. Clifford Attractor REBORN — supercharged with density layers & audio pulse
-          (alpha) => {
-            ctx.globalAlpha = alpha;
-            ctx.globalCompositeOperation = "lighter";
-
-            // Parameters morph over time to create visual phase transitions
-            const a = -1.7 + Math.sin(time * 0.11) * 0.5 + bp * 0.3;
-            const b = 1.3 + Math.cos(time * 0.13) * 0.5 + mp * 0.2;
-            const c = -0.9 + Math.sin(time * 0.17) * 0.5;
-            const d2 = -1.2 + Math.cos(time * 0.09) * 0.5 + tp * 0.2;
-            // Scale pulses with bass
-            const sc = minD * (0.2 + bp * 0.06);
-
-            let x2 = 0.1, y2 = 0;
-            const pts2 = 8000; // More points = richer density
-
-            // Pre-run to settle the attractor
-            for (let i = 0; i < 200; i++) {
-              const nx2 = Math.sin(a * y2) + c * Math.cos(a * x2);
-              const ny2 = Math.sin(b * x2) + d2 * Math.cos(b * y2);
-              x2 = nx2; y2 = ny2;
-            }
-
-            for (let i = 0; i < pts2; i++) {
-              const nx2 = Math.sin(a * y2) + c * Math.cos(a * x2);
-              const ny2 = Math.sin(b * x2) + d2 * Math.cos(b * y2);
-              x2 = nx2; y2 = ny2;
-
-              const px = x2 * sc;
-              const py = y2 * sc;
-
-              // Multi-band color: position in sequence drives hue cycling
-              const progress = i / pts2;
-              const hue = dynHue(H2 + progress * 280 + time * 22);
-              // Treble boosts brightness, bass boosts opacity
-              const bright = 55 + tp * 25 + bp * 15;
-              const opac = 0.025 + bp * 0.02 + tp * 0.015;
-              // Particle size reacts to bass — on beat they "swell"
-              const sz = 1.5 + bp * 2;
-
-              ctx.fillStyle = `hsla(${hue}, 100%, ${bright}%, ${opac})`;
-              ctx.fillRect(px - sz/2, py - sz/2, sz, sz);
-            }
-
-            // Glowing core aura pulsing with bass
-            const auraR = minD * 0.08 * (1 + bp * 1.2);
-            const aHue = dynHue(H2 + time * 15);
-            const aGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, auraR);
-            aGrad.addColorStop(0, `hsla(${aHue}, 100%, 80%, ${0.35 * bp * alpha})`);
-            aGrad.addColorStop(1, `hsla(${aHue}, 100%, 40%, 0)`);
-            ctx.beginPath();
-            ctx.arc(0, 0, auraR, 0, Math.PI * 2);
-            ctx.fillStyle = aGrad;
-            ctx.fill();
-
-            ctx.globalCompositeOperation = "source-over";
-          },
-
           // 15. Golden Ratio Sunflower — phyllotaxis spiral with audio pulse and enhancements
           (alpha) => {
             ctx.globalAlpha = alpha;
@@ -1416,13 +1316,17 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
       }
     };
 
-    draw();
+    draw(performance.now());
     return () => {
+      isActive = false;
       window.removeEventListener("resize", resize);
       document.removeEventListener("fullscreenchange", onFSChange);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [analyser, mode, playing, fractalOverride]);
+  // Single setup — props are read via refs, so no restarts needed
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return <canvas ref={canvasRef} className="w-full h-full block" />;
 };

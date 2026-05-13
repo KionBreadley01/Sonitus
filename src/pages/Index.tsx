@@ -421,7 +421,7 @@ const Index = () => {
                 Auto
               </button>
               <div className="w-[1px] h-4 bg-white/10 self-center mx-1" />
-              {Array.from({ length: 10 }, (_, idx) => (
+              {Array.from({ length: 8 }, (_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setFractalOverride(idx)}
