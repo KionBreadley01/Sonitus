@@ -33,11 +33,13 @@ const Index = () => {
   const [, force] = useState(0);
 
   const [showSidebar, setShowSidebar] = useState(false);
+  const [showUI, setShowUI] = useState(true);
   const [showVisualizer, setShowVisualizer] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const jsmediatagsRef = useRef<any>(null);
   const shouldPlayRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [fractalOverride, setFractalOverride] = useState<number | null>(null);
 
   useEffect(() => {
     // Load previously saved tracks
@@ -230,13 +232,14 @@ const Index = () => {
     <div ref={containerRef} className="min-h-screen w-full overflow-hidden relative flex text-foreground" style={{ background: "var(--gradient-bg)" }}>
       {/* Visualizer canvas */}
       <div className={cn("absolute inset-0 transition-opacity duration-1000 pointer-events-none z-0", showVisualizer ? "opacity-100" : "opacity-0")}>
-        <Visualizer analyser={analyserRef.current} mode={mode} playing={playing} />
+        <Visualizer analyser={analyserRef.current} mode={mode} playing={playing} fractalOverride={fractalOverride} />
       </div>
 
       {/* Main Content Area */}
       <div className="relative z-10 flex flex-col flex-1 h-screen">
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-5 shrink-0 relative z-[60]">
+          {/* Left: Branding & Menu - Always Visible */}
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => setShowSidebar(!showSidebar)} className="hover:bg-foreground/10 text-foreground" title="Abrir Menú">
               <Menu className="w-6 h-6" />
@@ -249,67 +252,113 @@ const Index = () => {
             <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SONITUS</h1>
           </div>
 
+          {/* Right: Controls - Conditional Visibility */}
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => setShowVisualizer(!showVisualizer)} title="Toggle Visualizer" className="text-foreground/80 hover:text-white">
-              {showVisualizer ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+            <Button variant="ghost" size="icon" onClick={() => setShowUI(!showUI)} title={showUI ? "Ocultar Interfaz" : "Mostrar Interfaz"} className="text-foreground/80 hover:text-white z-[70]">
+              {showUI ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </Button>
-            <Button variant="ghost" size="icon" onClick={toggleFullscreen} title="Toggle Fullscreen" className="text-foreground/80 hover:text-white hidden sm:flex">
-              {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-            </Button>
-            {/* Desktop mode selector */}
-            <div className="hidden sm:flex gap-1 rounded-full border border-foreground/20 backdrop-blur-md bg-background/50 p-1">
-              {(["bars", "circle", "wave", "particles", "universe", "psycho", "arc3d"] as VisualMode[]).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => {
-                    setMode(m);
-                    setShowVisualizer(true);
-                  }}
-                  className={cn(
-                    "px-4 py-1.5 text-xs uppercase tracking-widest rounded-full transition-all",
-                    mode === m && showVisualizer
-                      ? "text-white font-semibold shadow-lg"
-                      : "text-foreground/70 hover:text-white hover:bg-foreground/10"
-                  )}
-                  style={mode === m && showVisualizer ? { background: "var(--gradient-neon)" } : {}}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
+            
+            <div className={cn(
+              "flex items-center gap-4 transition-all duration-500",
+              !showUI && "opacity-0 pointer-events-none translate-x-10"
+            )}>
+              <Button variant="ghost" size="icon" onClick={toggleFullscreen} title="Toggle Fullscreen" className="text-foreground/80 hover:text-white hidden sm:flex">
+                {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+              </Button>
+              {/* Desktop mode selector */}
+              <div className="hidden sm:flex gap-1 rounded-full border border-foreground/20 backdrop-blur-md bg-background/50 p-1">
+                {(["bars", "circle", "wave", "particles", "universe", "psycho", "arc3d", "fractal"] as VisualMode[]).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => {
+                      setMode(m);
+                      setShowVisualizer(true);
+                    }}
+                    className={cn(
+                      "px-4 py-1.5 text-xs uppercase tracking-widest rounded-full transition-all",
+                      mode === m && showVisualizer
+                        ? "text-white font-semibold shadow-lg"
+                        : "text-foreground/70 hover:text-white hover:bg-foreground/10"
+                    )}
+                    style={mode === m && showVisualizer ? { background: "var(--gradient-neon)" } : {}}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
 
-            {/* Mobile mode selector (Dropdown) */}
-            <div className="sm:hidden flex items-center">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-9 px-3 text-xs uppercase tracking-widest border-foreground/20 bg-background/50 backdrop-blur-md">
-                    {mode} <ChevronDown className="ml-2 w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="bg-background/90 backdrop-blur-lg border-foreground/10 text-foreground">
-                  {(["bars", "circle", "wave", "particles", "universe", "psycho", "arc3d"] as VisualMode[]).map((m) => (
-                    <DropdownMenuItem
-                      key={m}
-                      onClick={() => {
-                        setMode(m);
-                        setShowVisualizer(true);
-                      }}
-                      className={cn(
-                        "uppercase text-xs tracking-widest cursor-pointer",
-                        mode === m && "text-primary font-bold"
-                      )}
-                    >
-                      {m}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* Mobile mode selector (Dropdown) */}
+              <div className="sm:hidden flex items-center">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 px-3 text-xs uppercase tracking-widest border-foreground/20 bg-background/50 backdrop-blur-md">
+                      {mode} <ChevronDown className="ml-2 w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="bg-background/90 backdrop-blur-lg border-foreground/10 text-foreground">
+                    {(["bars", "circle", "wave", "particles", "universe", "psycho", "arc3d", "fractal"] as VisualMode[]).map((m) => (
+                      <DropdownMenuItem
+                        key={m}
+                        onClick={() => {
+                          setMode(m);
+                          setShowVisualizer(true);
+                        }}
+                        className={cn(
+                          "uppercase text-xs tracking-widest cursor-pointer",
+                          mode === m && "text-primary font-bold"
+                        )}
+                      >
+                        {m}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
           </div>
         </header>
 
         {/* Empty space for visualizer */}
         <div className="flex-1 pointer-events-none" />
+
+        {/* Fractal Selector Panel - Fixed at top */}
+        {mode === "fractal" && (
+          <div className={cn(
+            "fixed top-[88px] left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-[100] pointer-events-none transition-all duration-500",
+            !showUI && "opacity-0 -translate-y-10"
+          )}>
+            <div className="flex gap-1 p-1.5 bg-black/40 backdrop-blur-2xl border border-white/10 rounded-full pointer-events-auto shadow-2xl ring-1 ring-white/5">
+              <button
+                onClick={() => setFractalOverride(null)}
+                className={cn(
+                  "px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-full transition-all duration-300",
+                  fractalOverride === null 
+                    ? "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)] scale-105" 
+                    : "text-white/50 hover:text-white hover:bg-white/10"
+                )}
+              >
+                Auto
+              </button>
+              <div className="w-[1px] h-4 bg-white/10 self-center mx-1" />
+              {[0, 1, 2, 3, 4, 5, 6].map((idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setFractalOverride(idx)}
+                  className={cn(
+                    "w-9 h-9 flex items-center justify-center text-[11px] font-bold rounded-full transition-all duration-300 border",
+                    fractalOverride === idx 
+                      ? "bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.3)] scale-110 z-10" 
+                      : "text-white/50 hover:text-white hover:bg-white/10 border-transparent hover:border-white/10"
+                  )}
+                  title={`Fractal ${idx + 1}`}
+                >
+                  {idx + 1}
+                </button>
+              ))}
+            </div>
+            <p className="text-[9px] uppercase tracking-[0.2em] text-white/30 font-medium">Selector de Fractales</p>
+          </div>
+        )}
 
         {/* Mobile Fullscreen Toggle */}
         <div className="sm:hidden w-full flex justify-end px-6 pb-4 shrink-0 z-20 pointer-events-none">
@@ -326,8 +375,8 @@ const Index = () => {
 
         {/* Bottom panel */}
         <div className={cn(
-          "px-6 pb-6 shrink-0 z-10",
-          isFullscreen ? "hidden" : "block"
+          "px-6 pb-6 shrink-0 z-10 transition-all duration-500",
+          (isFullscreen || !showUI) ? "opacity-0 pointer-events-none translate-y-10" : "opacity-100 block"
         )}>
           <div className="mx-auto max-w-4xl rounded-2xl border border-foreground/10 backdrop-blur-xl bg-background/40 p-5 shadow-2xl">
             {tracks.length === 0 ? (
