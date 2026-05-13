@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { Upload, Play, Pause, SkipBack, SkipForward, Music2, Volume2, ListMusic, Maximize2, Minimize2, Eye, EyeOff, X, Trash2, Menu, Search, ChevronDown, Heart } from "lucide-react";
+import { Upload, Play, Pause, SkipBack, SkipForward, Music2, Volume2, ListMusic, Maximize2, Minimize2, Eye, EyeOff, X, Trash2, Menu, Search, ChevronDown, Heart, Download } from "lucide-react";
 import { Visualizer, VisualMode } from "@/components/Visualizer";
 import { cn } from "@/lib/utils";
 import { get, set } from "idb-keyval";
@@ -43,6 +43,36 @@ const Index = () => {
   const [fractalOverride, setFractalOverride] = useState<number | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [sidebarTab, setSidebarTab] = useState<"all" | "favorites">("all");
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    // Capture install prompt
+    const handler = (e: any) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    // Detect if already installed
+    if (window.matchMedia("(display-mode: standalone)").matches) {
+      setIsInstalled(true);
+    }
+    window.addEventListener("appinstalled", () => {
+      setIsInstalled(true);
+      setInstallPrompt(null);
+    });
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") {
+      setIsInstalled(true);
+      setInstallPrompt(null);
+    }
+  };
 
   useEffect(() => {
     // Load previously saved tracks
@@ -294,6 +324,17 @@ const Index = () => {
 
           {/* Right: Controls - Conditional Visibility */}
           <div className="flex items-center gap-4">
+            {/* PWA Install Button */}
+            {installPrompt && !isInstalled && (
+              <button
+                onClick={handleInstall}
+                title="Instalar Sonitus como app"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold text-white/90 border border-white/20 bg-white/10 backdrop-blur-sm hover:bg-white/20 hover:border-white/40 transition-all hover:scale-105 shadow-lg"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Instalar</span>
+              </button>
+            )}
             <Button variant="ghost" size="icon" onClick={() => setShowUI(!showUI)} title={showUI ? "Ocultar Interfaz" : "Mostrar Interfaz"} className="text-foreground/80 hover:text-white z-[70]">
               {showUI ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </Button>
