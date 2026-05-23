@@ -334,7 +334,26 @@ const Index = () => {
               alt="Sonitus Logo" 
               className="w-10 h-10 rounded-xl shadow-lg object-cover" 
             />
-            <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SONITUS</h1>
+            <div className="flex flex-col justify-center">
+              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md leading-none mt-1">SONITUS</h1>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button className="text-[9px] text-white/40 hover:text-white transition-colors uppercase tracking-widest text-left mt-1.5 outline-none">
+                    Powered by E.M.I
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md bg-background/95 backdrop-blur-xl border-foreground/10 text-foreground p-6">
+                  <DialogHeader>
+                    <DialogTitle className="text-white text-lg font-bold tracking-wide">
+                      E.M.I Core
+                    </DialogTitle>
+                  </DialogHeader>
+                  <DialogDescription className="text-foreground/70 leading-relaxed text-sm mt-2">
+                    Sistema experimental de mutación fractal audio-reactiva en tiempo real.
+                  </DialogDescription>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
 
           {/* Right: Controls - Conditional Visibility */}
