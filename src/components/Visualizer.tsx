@@ -48,6 +48,7 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
   // ARC3D State
   const arc3dHeightsRef = useRef<number[]>(new Array(48).fill(0));
   const arc3dRotationRef = useRef(0);
+  const mandalaRotationRef = useRef(0);
   // Pre-allocated buffers — never recreated during animation
   const freqBufRef = useRef<Uint8Array | null>(null);
   const timeBufRef = useRef<Uint8Array | null>(null);
@@ -88,14 +89,39 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
     let frame = 0;
     let isActive = true;
     let lastTimestamp: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    // Hybrid RAF + setTimeout loop.
+    // Browsers throttle requestAnimationFrame when another window overlaps
+    // (even in fullscreen). We use a parallel setTimeout at ~60fps as a
+    // heartbeat so the visualizer never freezes regardless of window focus.
+    const TARGET_FPS = 60;
+    const TARGET_FRAME_MS = 1000 / TARGET_FPS;
+
+    let rafScheduled = false;
+
+    const scheduleFrame = () => {
+      if (!isActive) return;
+      if (!rafScheduled) {
+        rafScheduled = true;
+        rafRef.current = requestAnimationFrame((ts) => {
+          rafScheduled = false;
+          draw(ts);
+        });
+      }
+    };
+
+    const heartbeat = () => {
+      if (!isActive) return;
+      // Fire a frame via RAF; if RAF is being throttled the draw call
+      // below via setTimeout will still run within ~16ms.
+      scheduleFrame();
+      timeoutId = setTimeout(heartbeat, TARGET_FRAME_MS);
+    };
 
     const draw = (timestamp: number) => {
       if (!isActive) return;
-      rafRef.current = requestAnimationFrame(draw);
 
-      // Always render — never block on document.hidden.
-      // The 100ms cap prevents speed-jumps if the browser throttled RAF
-      // (e.g. returning from a background tab).
       const dtMs = lastTimestamp === null ? 0 : Math.min(timestamp - lastTimestamp, 100);
       lastTimestamp = timestamp;
       // Scale: ~0.012 per frame at 60fps ≈ 0.72/s
@@ -161,6 +187,11 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
       const mid = avg(fdata, 10, 60);
       const treble = avg(fdata, 60, 180);
       const energy = (bass + mid + treble) / 3 / 255;
+
+      // Accumulate smooth monotonic rotation (smooths out jitter completely!)
+      const rotationSpeedMultiplier = 1.0 + (mid / 255) * 1.5;
+      mandalaRotationRef.current += dtMs * 0.001 * rotationSpeedMultiplier;
+      const mandalaRot = mandalaRotationRef.current;
 
       // Dynamic hue — accumulate beat kicks + slow time drift
       const delta = bass - lastBassRef.current;
@@ -776,7 +807,7 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
         
         // --- RANDOMIZED MULTI-FRACTAL SYSTEM ---
         const cycleLength = 12; // 12 seconds per fractal shape (updated from 5)
-        const totalFractals = 8;
+        const totalFractals = 9;
         
         // Use time and a random offset to compute pseudo-random transitions
         const currentCycleId = Math.floor(time / cycleLength) + randomOffsetRef.current;
@@ -851,11 +882,14 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
             ctx.shadowBlur = 0;
           },
 
-          // 2. Koch Star / Sierpinski Polygons
+          // 2. Koch Star / Sierpinski Polygons with Audio-Reactive Core & Outer Ring
           (alpha) => {
             ctx.globalAlpha = alpha;
             const maxDepth = 4;
             const paths = Array.from({ length: maxDepth + 1 }, () => new Path2D());
+            
+            // Collect vertices for rendering glowing nodes on high treble
+            const vertices: {x: number, y: number, d: number}[] = [];
             
             const drawPoly = (x: number, y: number, r: number, angle: number, depth: number) => {
                if (depth > maxDepth) return;
@@ -865,10 +899,16 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                   const py = y + Math.sin(a) * r;
                   if (i === 0) paths[depth].moveTo(px, py);
                   else paths[depth].lineTo(px, py);
+                  
+                  if (depth >= 3 && tp > 0.2) {
+                     vertices.push({x: px, y: py, d: depth});
+                  }
                }
                paths[depth].closePath();
-               const shrink = 0.5 + tp * 0.1;
-               const rotOffset = time * 0.5 * (depth % 2 === 0 ? 1 : -1) + mp * 0.5;
+               
+               // Shrink reacts to treble, rotation to mids
+               const shrink = 0.5 + tp * 0.15;
+               const rotOffset = time * 0.5 * (depth % 2 === 0 ? 1 : -1) + mp * 0.8;
                for (let i = 0; i < 3; i++) {
                   const a = angle + (i * Math.PI * 2) / 3;
                   const px = x + Math.cos(a) * r;
@@ -876,17 +916,79 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                   drawPoly(px, py, r * shrink, angle + rotOffset, depth + 1);
                }
             };
-            // Reduced base radius and slower pulsing
-            const baseR = minD * 0.32 * (1 + bp * 0.3 + Math.sin(time * 0.5) * 0.03);
-            drawPoly(0, 0, baseR, time * 0.3 + bp * 0.3, 0); // Slower
-            drawPoly(0, 0, baseR, time * -0.25 + Math.PI + mp * 0.2, 0); 
             
+            const baseR = minD * 0.32 * (1 + bp * 0.3 + Math.sin(time * 0.5) * 0.03);
+            
+            // Outer reactive aura/ring pulsing with bass
+            if (bp > 0.3) {
+               ctx.beginPath();
+               ctx.arc(0, 0, baseR * 1.5 * (1 + bp * 0.2), 0, Math.PI * 2);
+               ctx.strokeStyle = `hsla(${dynHue(H2)}, 100%, 60%, ${bp * 0.4})`;
+               ctx.lineWidth = 2 + bp * 5;
+               ctx.shadowBlur = 20 * bp;
+               ctx.shadowColor = `hsl(${dynHue(H2)}, 100%, 60%)`;
+               ctx.stroke();
+               ctx.shadowBlur = 0;
+            }
+
+            drawPoly(0, 0, baseR, time * 0.3 + bp * 0.5, 0); 
+            drawPoly(0, 0, baseR, time * -0.25 + Math.PI + mp * 0.5, 0); 
+            
+            // Draw the main fractal paths
             for (let d = 0; d <= maxDepth; d++) {
                const depthHue = dynHue(H1 + d * 40 + time * 15);
                ctx.strokeStyle = `hsla(${depthHue}, 75%, ${60 + tp * 30}%, ${1 - d/maxDepth + bp * 0.3})`;
-               ctx.lineWidth = 1 + (maxDepth - d) * 0.5 * (1 + bp);
+               ctx.lineWidth = 1 + (maxDepth - d) * 0.6 * (1 + bp);
+               
+               // Add glow for outer shapes when mids/treble are high
+               if (d <= 1 && mp > 0.4) {
+                   ctx.shadowBlur = 10 + mp * 15;
+                   ctx.shadowColor = `hsl(${depthHue}, 100%, 70%)`;
+               } else {
+                   ctx.shadowBlur = 0;
+               }
                ctx.stroke(paths[d]);
             }
+            ctx.shadowBlur = 0;
+
+            // Draw audio-reactive nodes on vertices for high treble
+            if (tp > 0.2) {
+               ctx.beginPath();
+               for (let i = 0; i < vertices.length; i++) {
+                  const v = vertices[i];
+                  // Stagger nodes based on time to create a shimmering effect without random flickering
+                  if ((i + Math.floor(time * 15)) % 3 !== 0) {
+                      ctx.moveTo(v.x, v.y);
+                      ctx.arc(v.x, v.y, 1.5 + tp * 2.5, 0, Math.PI * 2);
+                  }
+               }
+               ctx.fillStyle = `hsla(${dynHue(H3 + time * 50)}, 100%, 80%, ${tp * 0.8})`;
+               ctx.shadowBlur = 10 + tp * 15;
+               ctx.shadowColor = `hsl(${dynHue(H3)}, 100%, 75%)`;
+               ctx.fill();
+               ctx.shadowBlur = 0;
+            }
+
+            // Central energy core reacting to all frequencies
+            const coreR = minD * 0.05 * (1 + bp * 1.5 + mp * 0.5 + tp * 0.5);
+            ctx.beginPath();
+            
+            // Draw a reactive polygon in the center
+            const coreSides = 3 + Math.floor(mp * 4); // 3 to 6 sides based on mids
+            for (let i = 0; i < coreSides; i++) {
+                const a = time * 2 + (i * Math.PI * 2) / coreSides;
+                const px = Math.cos(a) * coreR;
+                const py = Math.sin(a) * coreR;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            
+            ctx.fillStyle = `hsla(${dynHue(H0 - time * 20)}, 100%, 70%, ${0.5 + bp * 0.5})`;
+            ctx.fill();
+            ctx.strokeStyle = `hsla(${dynHue(H0)}, 100%, 90%, ${0.8 + tp * 0.2})`;
+            ctx.lineWidth = 1.5 + tp * 2;
+            ctx.stroke();
           },
 
           // 3. Sacred Geometry Mandala
@@ -1300,6 +1402,411 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
             ctx.globalCompositeOperation = "source-over";
           },
 
+          // 9. 🌀 FRACTAL CORE — Kaleidoscopic mandala portal
+          (alpha) => {
+            const TAU = Math.PI * 2;
+            const T   = time;
+            const D   = minD;
+
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = alpha;
+
+            // ─── 1. Stellar Dust & Deep Breathing Nebula Background ────────
+            // Cosmic Space Dust (Deterministic & high performance)
+            ctx.globalCompositeOperation = "lighter";
+            ctx.fillStyle = `hsla(${dynHue(BH)}, 40%, 85%, ${0.25 * alpha})`;
+            ctx.beginPath();
+            for (let i = 0; i < 60; i++) {
+              const seedX = Math.sin(i * 43.19 + 7.4) * 0.5 + 0.5;
+              const seedY = Math.cos(i * 19.32 + 3.9) * 0.5 + 0.5;
+              const speed = 0.05 + 0.1 * (i % 5);
+              const starAng = time * speed + i * 2.3;
+              const starR = D * 0.03 + D * 0.45 * Math.sqrt(seedX);
+              const sx = Math.cos(starAng) * starR;
+              const sy = Math.sin(starAng) * starR;
+              const size = (0.8 + (i % 3) * 0.6) * (1 + tp * 0.8);
+              ctx.moveTo(sx, sy);
+              ctx.arc(sx, sy, size, 0, TAU);
+            }
+            ctx.fill();
+
+            // Upgraded Cosmic Nebula Clouds (Organic breathing gas)
+            for (let n = 0; n < 5; n++) {
+              const nAng = (n / 5) * TAU + T * 0.03 + n * 1.5;
+              // Expand/contract based on sub-bass bp
+              const nR   = D * (0.20 + 0.18 * Math.sin(T * 0.05 + n * 2.0) + bp * 0.1);
+              const nx   = Math.cos(nAng) * nR;
+              const ny   = Math.sin(nAng) * nR;
+              const nHue = dynHue(BH + n * 45 - T * 5);
+              const cloudSize = D * (0.35 + bp * 0.15 + Math.sin(T * 0.1 + n) * 0.05);
+              const ng   = ctx.createRadialGradient(nx, ny, 0, nx, ny, cloudSize);
+              ng.addColorStop(0,   `hsla(${nHue}, 85%, 10%, ${0.35 * alpha})`);
+              ng.addColorStop(0.5, `hsla(${nHue}, 75%, 5%,  ${0.18 * alpha})`);
+              ng.addColorStop(1,   `hsla(${nHue}, 65%, 2%,  0)`);
+              ctx.fillStyle = ng;
+              ctx.beginPath();
+              ctx.arc(nx, ny, cloudSize, 0, TAU);
+              ctx.fill();
+            }
+
+            // ─── 2. MANDALA BEZIER PETAL LAYERS ────────────────────────────
+            // [spokes, innerFrac, outerFrac, rotDir, hueBase, fillOpacity]
+            const spikeLayers: [number,number,number,number,number,number][] = [
+              [8,  0.07, 0.20,  1,  195, 0.70],
+              [12, 0.15, 0.30, -1,  215, 0.60],
+              [18, 0.23, 0.40,  1,  265, 0.52],
+              [24, 0.32, 0.50, -1,  305, 0.44],
+              [36, 0.42, 0.58,  1,  185, 0.34],
+              [48, 0.51, 0.65, -1,  200, 0.24],
+              [60, 0.60, 0.72,  1,  230, 0.16],
+              [72, 0.69, 0.80, -1,  260, 0.10],
+            ];
+
+            for (let li = 0; li < spikeLayers.length; li++) {
+              const [spokes, iF, oF, rotDir, hBase, fillOp] = spikeLayers[li];
+              // Perfectly smooth continuous rotation using monotonic mandalaRot
+              const layerRot = mandalaRot * (0.24 - li * 0.026) * rotDir;
+
+              // Smooth continuous camera traveling zoom effect (fly-through depth!)
+              // As time goes on, layers move outwards (progress goes 0 -> 1)
+              const travelIndex = ((li - mandalaRot * 0.05) % 8 + 8) % 8;
+              const travelProgress = travelIndex / 8;
+              
+              // Exponential/linear expansion for natural depth perception (camera travel!)
+              const currentScale = 0.05 + 0.90 * travelProgress;
+              
+              // Fade-in when emerging from the center, fade-out when exiting at the screen edge
+              let fade = 1.0;
+              if (travelProgress < 0.15) {
+                fade = travelProgress / 0.15;
+              } else if (travelProgress > 0.78) {
+                fade = Math.max(0, (1.0 - travelProgress) / 0.22);
+              }
+
+              const iR    = D * currentScale * (1 + bp * 0.30);
+              const oR    = D * currentScale * 1.5 * (1 + bp * 0.24) + D * 0.03 * mp;
+              const bHalf = iR * 0.40;
+              const tipEx = D * 0.04 * tp * Math.abs(Math.sin(mandalaRot * 15 + li));
+              const step  = TAU / spokes;
+
+              ctx.globalCompositeOperation = "source-over";
+              ctx.save();
+              ctx.rotate(layerRot);
+
+              for (let s = 0; s < spokes; s++) {
+                const sHue = dynHue(hBase + s * (120 / spokes) + T * 10);
+                ctx.save();
+                ctx.rotate(s * step);
+
+                // Elegant Bezier-curved lotus/flame petal shape
+                ctx.beginPath();
+                ctx.moveTo(iR, -bHalf);
+                // Control points for the outer curve (bloom reacts to treble tp)
+                const cpX = iR + (oR - iR) * 0.45;
+                const cpY1 = -bHalf * (1.8 + tp * 1.5);
+                const cpY2 = bHalf * (1.8 + tp * 1.5);
+                ctx.quadraticCurveTo(cpX, cpY1, oR + tipEx, 0);
+                ctx.quadraticCurveTo(cpX, cpY2, iR, bHalf);
+                ctx.quadraticCurveTo(iR * 0.8, 0, iR, -bHalf);
+                ctx.closePath();
+
+                // Multi-color linear gradient along the petal body (scaled by travel fade)
+                const petalGrad = ctx.createLinearGradient(iR, 0, oR + tipEx, 0);
+                petalGrad.addColorStop(0, `hsla(${dynHue(sHue)}, 100%, 45%, ${fillOp * fade * alpha})`);
+                petalGrad.addColorStop(0.5, `hsla(${dynHue(sHue + 40 + mp * 40)}, 100%, 55%, ${fillOp * 0.8 * fade * alpha})`);
+                petalGrad.addColorStop(1, `hsla(${dynHue(sHue + 80 + bp * 60)}, 100%, 65%, ${fillOp * 0.4 * fade * alpha})`);
+                ctx.fillStyle = petalGrad;
+
+                ctx.fill();
+
+
+
+                ctx.restore();
+              }
+              ctx.restore();
+            }
+
+            // ─── 3. CYBERPUNK HUD & TECHNICAL RINGS ────────────────────────
+            ctx.globalCompositeOperation = "lighter";
+            ctx.save();
+            
+            // Technical Ring 1: Dashed Inner Dial (Clockwise rotation)
+            const hudRot1 = mandalaRot * 0.2;
+            ctx.save();
+            ctx.rotate(hudRot1);
+            ctx.beginPath();
+            ctx.arc(0, 0, D * 0.11 * (1 + bp * 0.05), 0, TAU);
+            ctx.strokeStyle = `hsla(${dynHue(BH + 60)}, 100%, 70%, ${0.45 * alpha})`;
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([6, 12, 2, 12]);
+            ctx.stroke();
+            ctx.restore();
+
+            // Technical Ring 2: Compass Ticks (Counter-clockwise rotation)
+            const hudRot2 = -mandalaRot * 0.15;
+            ctx.save();
+            ctx.rotate(hudRot2);
+            const ticks = 48;
+            ctx.strokeStyle = `hsla(${dynHue(BH + 140)}, 100%, 65%, ${0.35 * alpha})`;
+            ctx.lineWidth = 1.0;
+            const tInnerR = D * 0.26 * (1 + bp * 0.06);
+            const tOuterR = tInnerR + D * 0.015 * (1 + tp * 1.5);
+            ctx.beginPath();
+            for (let i = 0; i < ticks; i++) {
+              const a = (i / ticks) * TAU;
+              const cos = Math.cos(a), sin = Math.sin(a);
+              if (i % 6 === 0) {
+                ctx.moveTo(cos * tInnerR, sin * tInnerR);
+                ctx.lineTo(cos * (tOuterR + D * 0.01), sin * (tOuterR + D * 0.01));
+              } else if (i % 2 === 0) {
+                ctx.moveTo(cos * tInnerR, sin * tInnerR);
+                ctx.lineTo(cos * tOuterR, sin * tOuterR);
+              }
+            }
+            ctx.stroke();
+            ctx.restore();
+
+            // Technical Ring 3: Segmented Thick Outer Ring (Mids Reactive)
+            const hudRot3 = mandalaRot * 0.1;
+            ctx.save();
+            ctx.rotate(hudRot3);
+            ctx.beginPath();
+            ctx.arc(0, 0, D * 0.37 * (1 + bp * 0.08), 0, TAU * 0.45);
+            ctx.strokeStyle = `hsla(${dynHue(BH + 220)}, 100%, 72%, ${0.28 * alpha})`;
+            ctx.lineWidth = 2.0;
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(0, 0, D * 0.37 * (1 + bp * 0.08), TAU * 0.5, TAU * 0.95);
+            ctx.strokeStyle = `hsla(${dynHue(BH + 220)}, 100%, 72%, ${0.28 * alpha})`;
+            ctx.lineWidth = 2.0;
+            ctx.stroke();
+            
+            ctx.font = `${Math.floor(D * 0.018)}px monospace`;
+            ctx.fillStyle = `hsla(${dynHue(BH + 180)}, 100%, 75%, ${0.6 * alpha})`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            const labelDist = D * 0.39 * (1 + bp * 0.08);
+            ctx.fillText("N", 0, -labelDist);
+            ctx.fillText("S", 0, labelDist);
+            ctx.fillText("E", labelDist, 0);
+            ctx.fillText("W", -labelDist, 0);
+            
+            ctx.restore();
+            
+            // Technical Ring 4: Circular Audio Oscilloscope HUD (high-performance)
+            ctx.save();
+            ctx.rotate(-mandalaRot * 0.08); // Rotate very slowly
+            ctx.beginPath();
+            const oscPoints = 120;
+            const oscR = D * 0.41 * (1 + bp * 0.04);
+            for (let i = 0; i <= oscPoints; i++) {
+              const fract = i / oscPoints;
+              // Sample time domain data (silence is 128)
+              const tVal = tdata[Math.floor(fract * bufLen * 0.4)] / 128.0 - 1;
+              const angle = fract * TAU;
+              // Waveform displacement reactive to mids/bass
+              const offset = tVal * D * 0.03 * (1 + bp * 0.5);
+              const px = Math.cos(angle) * (oscR + offset);
+              const py = Math.sin(angle) * (oscR + offset);
+              if (i === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.strokeStyle = `hsla(${dynHue(BH + 260)}, 100%, 75%, ${0.35 * alpha})`;
+            ctx.lineWidth = 1.0;
+            ctx.stroke();
+            ctx.restore();
+            
+            ctx.restore();
+            ctx.setLineDash([]);
+            ctx.globalCompositeOperation = "source-over";
+
+            // ─── 4. CINEMATIC VOLUMETRIC LIGHT RAYS ─────────────────────────
+            ctx.globalCompositeOperation = "lighter";
+            const numRays = 16;
+            const rayMaxLen = D * 0.65;
+            const rayRot = mandalaRot * 0.05;
+            
+            for (let r = 0; r < numRays; r++) {
+              const rayAngle = (r / numRays) * TAU + rayRot;
+              const rayLen = rayMaxLen * (0.6 + 0.4 * Math.sin(mandalaRot * 2 + r * 0.7) + bp * 0.3);
+              const widthSpread = 0.05 + tp * 0.08;
+              
+              const x1 = Math.cos(rayAngle - widthSpread) * (D * 0.05);
+              const y1 = Math.sin(rayAngle - widthSpread) * (D * 0.05);
+              const x2 = Math.cos(rayAngle) * rayLen;
+              const y2 = Math.sin(rayAngle) * rayLen;
+              const x3 = Math.cos(rayAngle + widthSpread) * (D * 0.05);
+              const y3 = Math.sin(rayAngle + widthSpread) * (D * 0.05);
+              
+              const rayHue = dynHue(BH - 30 + r * (360 / numRays) * 0.25 + mandalaRot * 10);
+              const rayGrad = ctx.createLinearGradient(0, 0, x2, y2);
+              rayGrad.addColorStop(0, `hsla(${rayHue}, 95%, 75%, ${0.18 * alpha})`);
+              rayGrad.addColorStop(0.3, `hsla(${rayHue}, 90%, 65%, ${0.08 * alpha})`);
+              rayGrad.addColorStop(1, `hsla(${rayHue}, 80%, 55%, 0)`);
+              
+              ctx.fillStyle = rayGrad;
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.lineTo(x3, y3);
+              ctx.closePath();
+              ctx.fill();
+            }
+            ctx.globalCompositeOperation = "source-over";
+
+            // ─── 5. CHROMATIC ABERRATION BASS SHOCKWAVES ───────────────────
+            if (bp > 0.25) {
+              const shR = D * 0.58 * bp;
+              const shAlpha = (bp - 0.25) / 0.75 * 0.55 * alpha;
+              ctx.globalCompositeOperation = "lighter";
+              ctx.lineWidth = 1.5 + bp * 6;
+              
+              ctx.beginPath();
+              ctx.arc(-2 - bp * 5, 0, shR, 0, TAU);
+              ctx.strokeStyle = `rgba(255, 0, 80, ${shAlpha})`;
+              ctx.stroke();
+              
+              ctx.beginPath();
+              ctx.arc(2 + bp * 5, 0, shR, 0, TAU);
+              ctx.strokeStyle = `rgba(0, 255, 255, ${shAlpha})`;
+              ctx.stroke();
+              
+              ctx.beginPath();
+              ctx.arc(0, 0, shR, 0, TAU);
+              ctx.strokeStyle = `rgba(255, 255, 255, ${shAlpha * 0.6})`;
+              ctx.lineWidth = 1.0;
+              ctx.stroke();
+              
+              ctx.globalCompositeOperation = "source-over";
+            }
+
+            // ─── 6. TREBLE STARBURST FLARES ────────────────────────────────
+            if (tp > 0.12) {
+              ctx.globalCompositeOperation = "lighter";
+              const spkN = Math.min(Math.floor(tp * 28) + 4, 22);
+              for (let sp = 0; sp < spkN; sp++) {
+                const sAng = (sp / spkN) * TAU + mandalaRot * 1.8 + sp * 1.618;
+                const sR   = D * (0.06 + (sp % 6) / 6 * 0.52 + bp * 0.08);
+                const sHue = dynHue(BH - 45 + sp * 18 + mandalaRot * 12);
+                const sx = Math.cos(sAng) * sR;
+                const sy = Math.sin(sAng) * sR;
+                const flareSize = (4.0 + tp * 12.0) * (0.4 + 0.6 * (sp % 3) / 3);
+                
+                ctx.strokeStyle = `hsla(${sHue}, 100%, 88%, ${0.45 * tp * alpha})`;
+                ctx.lineWidth = 1.0 + tp * 1.5;
+                ctx.beginPath();
+                ctx.moveTo(sx - flareSize, sy);
+                ctx.lineTo(sx + flareSize, sy);
+                ctx.moveTo(sx, sy - flareSize);
+                ctx.lineTo(sx, sy + flareSize);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.arc(sx, sy, 1.2 + tp * 2.0, 0, TAU);
+                ctx.fillStyle  = `hsla(${sHue}, 100%, 95%, ${0.7 * tp * alpha})`;
+                ctx.fill();
+              }
+              ctx.globalCompositeOperation = "source-over";
+            }
+
+            // ─── 7. SINGULARITY CORE & ACCRETION DISK ──────────────────────
+            ctx.globalCompositeOperation = "source-over";
+            const cR   = D * 0.065 * (1 - bp * 0.08);
+            
+            ctx.globalCompositeOperation = "lighter";
+            const accHue = dynHue(BH - 60 + mandalaRot * 20);
+            ctx.save();
+            ctx.rotate(-mandalaRot * 3.0);
+            const spiralTurns = 3;
+            const spiralPoints = 80;
+            ctx.beginPath();
+            for (let i = 0; i < spiralPoints; i++) {
+              const fraction = i / spiralPoints;
+              const spiralAngle = fraction * spiralTurns * TAU;
+              const spiralRadius = cR + fraction * cR * 2.0 * (1 + bp * 0.2);
+              const sx = Math.cos(spiralAngle) * spiralRadius;
+              const sy = Math.sin(spiralAngle) * spiralRadius;
+              if (i === 0) ctx.moveTo(sx, sy);
+              else ctx.lineTo(sx, sy);
+            }
+            ctx.strokeStyle = `hsla(${accHue}, 100%, 65%, ${0.6 * alpha})`;
+            ctx.lineWidth = 2.0 + bp * 4.0;
+            ctx.stroke();
+            ctx.restore();
+            
+            ctx.globalCompositeOperation = "lighter";
+            const rimG = ctx.createRadialGradient(0, 0, cR * 0.4, 0, 0, cR * 2.2);
+            rimG.addColorStop(0,    `hsla(${dynHue(BH + 120)}, 100%, 80%, ${0.95 * alpha})`);
+            rimG.addColorStop(0.3,  `hsla(${dynHue(BH + 200)}, 100%, 65%, ${0.75 * alpha})`);
+            rimG.addColorStop(0.65, `hsla(${dynHue(BH + 280)}, 100%, 48%, ${0.35 * alpha})`);
+            rimG.addColorStop(1,    `hsla(${dynHue(BH + 200)}, 100%, 30%, 0)`);
+            ctx.beginPath();
+            ctx.arc(0, 0, cR * 2.2, 0, TAU);
+            ctx.fillStyle  = rimG;
+            ctx.fill();
+            
+            // Gravitational Einstein Rings & High-energy Photon Sphere Orbits (Multiple concentric shells)
+            const numSpheres = 4;
+            for (let i = 0; i < numSpheres; i++) {
+              ctx.save();
+              const sphereR = cR * (2.6 + i * 0.8);
+              const sphereSpeed = (1.8 - i * 0.3) * (i % 2 === 0 ? 1 : -1);
+              ctx.rotate(mandalaRot * sphereSpeed);
+              ctx.beginPath();
+              ctx.arc(0, 0, sphereR, 0, TAU);
+              
+              const sphereHue = dynHue(BH + 300 + i * 20);
+              ctx.strokeStyle = `hsla(${sphereHue}, 100%, 75%, ${(0.32 - i * 0.05) * alpha})`;
+              ctx.lineWidth = 1.0;
+              
+              // Custom technical dash array for each shell
+              const d1 = 4 + i * 2;
+              const d2 = 18 + i * 6;
+              const d3 = 1 + i;
+              ctx.setLineDash([d1, d2, d3, d2]);
+              ctx.stroke();
+              ctx.restore();
+            }
+
+            // Swirling Accretion Inflow Streams (falling into the singularity)
+            ctx.save();
+            ctx.rotate(mandalaRot * 2.2);
+            ctx.beginPath();
+            const streams = 3;
+            for (let s = 0; s < streams; s++) {
+              const streamOff = (s / streams) * TAU;
+              ctx.moveTo(0, 0);
+              for (let i = 0; i < 40; i++) {
+                const fraction = i / 40;
+                // Spiral winds tighter into the center
+                const angle = fraction * 2.5 * TAU + streamOff;
+                const r = cR + fraction * D * 0.22;
+                ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+              }
+            }
+            ctx.strokeStyle = `hsla(${dynHue(BH - 80)}, 95%, 72%, ${0.22 * alpha})`;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+            ctx.restore();
+            ctx.setLineDash([]); // Reset
+            
+            ctx.globalCompositeOperation = "source-over";
+            ctx.beginPath();
+            ctx.arc(0, 0, cR, 0, TAU);
+            ctx.fillStyle = "#000000";
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(0, 0, cR, 0, TAU);
+            ctx.strokeStyle = `hsla(${dynHue(BH + 120)}, 100%, 90%, ${0.85 * alpha})`;
+            ctx.lineWidth = 1.0 + tp * 2.0;
+            ctx.stroke();
+
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = "source-over";
+          },
+
         ];
 
         // Render the active fractals with crossfade
@@ -1316,13 +1823,14 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
       }
     };
 
-    draw(performance.now());
+    heartbeat();
     return () => {
       isActive = false;
       window.removeEventListener("resize", resize);
       document.removeEventListener("fullscreenchange", onFSChange);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (timeoutId !== null) clearTimeout(timeoutId);
     };
   // Single setup — props are read via refs, so no restarts needed
   // eslint-disable-next-line react-hooks/exhaustive-deps
