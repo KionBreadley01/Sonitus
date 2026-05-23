@@ -83,7 +83,16 @@ const Index = () => {
         const savedTime = await get<number>("music_time");
         const savedFavs = await get<string[]>("music_favorites");
         if (savedTracks && savedTracks.length > 0) {
-          const revived = savedTracks.map(t => ({
+          // Remove potential existing duplicates from IDB
+          const uniqueSaved: Track[] = [];
+          const seen = new Set<string>();
+          for (const t of savedTracks) {
+            if (!seen.has(t.name)) {
+              seen.add(t.name);
+              uniqueSaved.push(t);
+            }
+          }
+          const revived = uniqueSaved.map(t => ({
             ...t,
             url: URL.createObjectURL(t.file)
           }));
@@ -91,8 +100,10 @@ const Index = () => {
             restoredTimeRef.current = savedTime;
           }
           setTracks(revived);
-          if (typeof savedCurrent === "number" && savedCurrent < savedTracks.length) {
+          if (typeof savedCurrent === "number" && savedCurrent < uniqueSaved.length) {
             setCurrent(savedCurrent);
+          } else {
+            setCurrent(0);
           }
         }
         if (savedFavs) {
@@ -182,7 +193,9 @@ const Index = () => {
     );
 
     setTracks((prev) => {
-      const updated = [...prev, ...next];
+      const existingNames = new Set(prev.map(t => t.name));
+      const uniqueNext = next.filter(t => !existingNames.has(t.name));
+      const updated = [...prev, ...uniqueNext];
       set("music_tracks", updated.map(t => ({ ...t, url: "" })));
       return updated;
     });
@@ -421,7 +434,7 @@ const Index = () => {
                 Auto
               </button>
               <div className="w-[1px] h-4 bg-white/10 self-center mx-1" />
-              {Array.from({ length: 8 }, (_, idx) => (
+              {Array.from({ length: 9 }, (_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setFractalOverride(idx)}
