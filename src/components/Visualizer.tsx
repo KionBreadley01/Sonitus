@@ -1463,7 +1463,9 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
               const travelProgress = travelIndex / 8;
               
               // Exponential/linear expansion for natural depth perception (camera travel!)
-              const currentScale = 0.05 + 0.90 * travelProgress;
+              // + Global slow evolution: The entire flower breathes inward and outward over long periods
+              const globalBreath = Math.cos(T * 0.03 + li * 0.1) * 0.35; 
+              const currentScale = Math.max(0.01, (0.05 + 0.90 * travelProgress) * (1.0 + globalBreath));
               
               // Fade-in when emerging from the center, fade-out when exiting at the screen edge
               let fade = 1.0;
@@ -1475,7 +1477,10 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
 
               const iR    = D * currentScale * (1 + bp * 0.30);
               const oR    = D * currentScale * 1.5 * (1 + bp * 0.24) + D * 0.03 * mp;
-              const bHalf = iR * 0.40;
+              
+              // Slow macro-morphing factors so the fractal shape evolves organically over time
+              const morphMacro = Math.sin(T * 0.1 + li * 0.8);
+              const bHalf = iR * (0.35 + morphMacro * 0.15); // Petal base width fluctuates
               const tipEx = D * 0.04 * tp * Math.abs(Math.sin(mandalaRot * 15 + li));
               const step  = TAU / spokes;
 
@@ -1489,15 +1494,28 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                 ctx.rotate(s * step);
 
                 // Elegant Bezier-curved lotus/flame petal shape
+                // Adding organic breathing dynamism based on time (T) and petal index (s)
+                const breath = Math.sin(T * 2.5 + s * 0.5 + li) * 0.15; 
+                const breathW = Math.cos(T * 1.8 + s * 0.3) * 0.08;
+                const tipDynamic = tipEx + Math.sin(T * 3.5 + s * 0.8) * (oR * 0.03);
+                
+                // Slow organic morphing of the petal's silhouette
+                const morphShapeY = 1.8 + Math.cos(T * 0.15 + li * 0.5) * 0.7; // oscillates the bulbousness
+                
+                // TORSION EVOLUTION: Asymmetric skewing that turns petals into curved spiral arms
+                const torsion = Math.sin(T * 0.07 + li * 0.4) * 1.6; // Very slow, majestic twisting
+                const skew = torsion * bHalf; 
+
                 ctx.beginPath();
                 ctx.moveTo(iR, -bHalf);
-                // Control points for the outer curve (bloom reacts to treble tp)
-                const cpX = iR + (oR - iR) * 0.45;
-                const cpY1 = -bHalf * (1.8 + tp * 1.5);
-                const cpY2 = bHalf * (1.8 + tp * 1.5);
-                ctx.quadraticCurveTo(cpX, cpY1, oR + tipEx, 0);
+                // Control points for the outer curve (bloom reacts to treble tp + dynamic breath + morph)
+                const cpX = iR + (oR - iR) * (0.45 + breathW + bp * 0.05);
+                const cpY1 = -bHalf * (morphShapeY + tp * 1.5 + breath) + skew;
+                const cpY2 = bHalf * (morphShapeY + tp * 1.5 + breath) + skew;
+                
+                ctx.quadraticCurveTo(cpX, cpY1, oR + tipDynamic, skew * 1.3); // The tip shifts sideways
                 ctx.quadraticCurveTo(cpX, cpY2, iR, bHalf);
-                ctx.quadraticCurveTo(iR * 0.8, 0, iR, -bHalf);
+                ctx.quadraticCurveTo(iR * (0.8 + breathW * 0.5), skew * 0.5, iR, -bHalf);
                 ctx.closePath();
 
                 // Multi-color linear gradient along the petal body (scaled by travel fade)
