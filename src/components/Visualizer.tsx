@@ -1049,11 +1049,22 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
           (alpha) => {
              ctx.globalAlpha = alpha;
              const maxD = 3; 
-             const rx = time * 0.5 + bp * 0.3; 
-             const ry = time * 0.35 + mp * 0.4;
              
-             // 3D to 2D projection
-             const project = (x: number, y: number, z: number) => {
+             // Organic macro evolutions (Dramatically accelerated and amplified for obvious aspect changing)
+             const globalBreath = Math.cos(time * 0.4) * 0.6; // Breathing scale faster and deeper
+             const morphTorsion = Math.sin(time * 0.6) * 1.8; // Spatial warping much faster and wilder
+             const morphSpread = Math.cos(time * 0.5) * 1.5; // Changes the explosion angle drastically
+             
+             const rx = time * 0.5 + bp * 0.3 + morphTorsion; 
+             const ry = time * 0.35 + mp * 0.4 - morphTorsion;
+             
+             // 3D to 2D projection with organic spatial warping
+             const project = (x: number, y: number, z: number, depth: number) => {
+                 // Organic twist in 3D space! The cubes bend like gelatin based on time
+                 const twist = Math.sin(time * 0.15 + (x + y) * 0.005) * morphTorsion * 80 * (depth + 1);
+                 x += twist;
+                 y -= twist;
+                 
                  let x1 = x * Math.cos(ry) - z * Math.sin(ry);
                  let z1 = x * Math.sin(ry) + z * Math.cos(ry);
                  let y2 = y * Math.cos(rx) - z1 * Math.sin(rx);
@@ -1067,30 +1078,47 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                 const pts = [
                    [-1,-1,-1], [1,-1,-1], [1,1,-1], [-1,1,-1],
                    [-1,-1,1], [1,-1,1], [1,1,1], [-1,1,1]
-                ].map(p => project(cx + p[0]*s, cy + p[1]*s, cz + p[2]*s));
+                ].map(p => project(cx + p[0]*s, cy + p[1]*s, cz + p[2]*s, depth));
                 
                 ctx.beginPath();
+                // Organic bending curves instead of straight rigid lines!
                 [[0,1],[1,2],[2,3],[3,0], [4,5],[5,6],[6,7],[7,4], [0,4],[1,5],[2,6],[3,7]].forEach(e => {
-                   ctx.moveTo(pts[e[0]][0], pts[e[0]][1]);
-                   ctx.lineTo(pts[e[1]][0], pts[e[1]][1]);
+                   const p1 = pts[e[0]];
+                   const p2 = pts[e[1]];
+                   ctx.moveTo(p1[0], p1[1]);
+                   // Curve bends dynamically using morphTorsion
+                   const bendX = (p2[1] - p1[1]) * morphTorsion * 0.4;
+                   const bendY = -(p2[0] - p1[0]) * morphTorsion * 0.4;
+                   ctx.quadraticCurveTo(
+                       (p1[0] + p2[0]) / 2 + bendX, 
+                       (p1[1] + p2[1]) / 2 + bendY, 
+                       p2[0], p2[1]
+                   );
                 });
                 
-                const hue = dynHue(BH + depth * 45);
+                const hue = dynHue(BH + depth * 45 + time * 10);
                 ctx.strokeStyle = `hsla(${hue}, 100%, ${60 + tp*30}%, ${alpha * (1 - depth/maxD + bp*0.5)})`;
-                ctx.lineWidth = 1.5 + bp*2;
+                ctx.lineWidth = 1.5 + bp*2 + (maxD - depth) * 0.5;
                 ctx.stroke();
                 
-                // Recurse at specific outer corners (Reduced to 3 corners to lower density)
+                // Recurse with evolving explosion distances and morphing corner targets
                 if (depth < maxD) {
-                    const ns = s * (0.45 + tp * 0.1);
-                    const dist = s * (1.5 + bp * 0.4); // Explode outwards
-                    [[-1,-1,-1], [1,1,-1], [-1,1,1]].forEach(p => {
+                    const ns = s * (0.45 + tp * 0.1 + globalBreath * 0.15); // Children cubes breathe
+                    const dist = s * (1.5 + bp * 0.4 + Math.abs(morphSpread) * 0.5); // Explosion breathes
+                    
+                    // The corners that spawn children mutate organically over time
+                    const spawnCorners = [
+                       [-1 + morphSpread * 0.5, -1, -1], 
+                       [1, 1 - morphSpread * 0.5, -1], 
+                       [-1, 1, 1 + morphSpread * 0.5]
+                    ];
+                    spawnCorners.forEach(p => {
                        drawBox(cx + p[0]*dist, cy + p[1]*dist, cz + p[2]*dist, ns, depth+1);
                     });
                 }
              };
              // Large initial box
-             drawBox(0, 0, 0, minD * 0.4 * (1 + bp * 0.3), 0);
+             drawBox(0, 0, 0, minD * 0.4 * (1 + globalBreath) * (1 + bp * 0.3), 0);
           },
 
           // 5. Water Molecules (Organic Metaball/Network)
