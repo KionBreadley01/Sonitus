@@ -7,6 +7,8 @@ interface Props {
   mode: VisualMode;
   playing: boolean;
   fractalOverride?: number | null;
+  onFractalChange?: (index: number) => void;
+  allowedFractals?: number[];
 }
 
 class Particle {
@@ -39,7 +41,7 @@ const avg = (a: Uint8Array, s: number, e: number) => {
   return sum / (end - s);
 };
 
-export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) => {
+export const Visualizer = ({ analyser, mode, playing, fractalOverride, onFractalChange, allowedFractals }: Props) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>();
   const particlesRef = useRef<Particle[]>([]);
@@ -59,12 +61,17 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
   const playingRef = useRef(playing);
   const analyserRef = useRef(analyser);
   const fractalOverrideRef = useRef(fractalOverride);
+  const onFractalChangeRef = useRef(onFractalChange);
+  const allowedFractalsRef = useRef(allowedFractals || [0,1,2,3,4,5,6,7,8]);
+  const lastReportedFractalRef = useRef<number | null>(null);
 
   // Keep refs in sync with props on every render
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { playingRef.current = playing; }, [playing]);
   useEffect(() => { analyserRef.current = analyser; }, [analyser]);
   useEffect(() => { fractalOverrideRef.current = fractalOverride ?? null; }, [fractalOverride]);
+  useEffect(() => { onFractalChangeRef.current = onFractalChange; }, [onFractalChange]);
+  useEffect(() => { allowedFractalsRef.current = allowedFractals && allowedFractals.length > 0 ? allowedFractals : [0,1,2,3,4,5,6,7,8]; }, [allowedFractals]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -820,9 +827,10 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
              return x - Math.floor(x);
         };
         
-        // Pick the current and next fractal randomly
-        let currentFractal = Math.floor(hash(currentCycleId) * totalFractals);
-        let nextFractal = Math.floor(hash(nextCycleId) * totalFractals);
+        // Pick the current and next fractal randomly from the allowed list
+        const allowed = allowedFractalsRef.current;
+        let currentFractal = allowed[Math.floor(hash(currentCycleId) * allowed.length)];
+        let nextFractal = allowed[Math.floor(hash(nextCycleId) * allowed.length)];
         
         // Crossfade logic: fade during the last 20% of the cycle
         let alphaCurrent = 1;
@@ -840,30 +848,61 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
           }
         }
 
+        // Report the current auto fractal to the UI
+        if ((fractalOverride === undefined || fractalOverride === null) && lastReportedFractalRef.current !== currentFractal) {
+          lastReportedFractalRef.current = currentFractal;
+          if (onFractalChangeRef.current) {
+             onFractalChangeRef.current(currentFractal);
+          }
+        }
+
         // Array of 6 fractal rendering algorithms
         type FractalRenderer = (alpha: number) => void;
         const renderers: FractalRenderer[] = [
           // 1. Recursive Fractal Trees (Optimized)
           (alpha) => {
             ctx.globalAlpha = alpha;
-            const roots = 12; // Increased to 12 for many more petals
+            
+            // Organic evolutions inspired by Fractal 9
+            const globalBreath = Math.cos(time * 0.035) * 0.35; // Global scaling over time
+            const morphShape = Math.sin(time * 0.07) * 0.9; // Alters the branching structure heavily
+            const torsion = Math.sin(time * 0.05) * 1.5; // Spiral twisting
+
+            const roots = 6; // Reduced petal density for a cleaner look
             const maxDepth = 7; 
-            const angleSpread = 0.55 + mp * 0.6 + Math.sin(time * 1.0) * 0.2; // Softer spread
-            const lengthShrink = 0.7 + tp * 0.2; // Softer branches
+            
+            // angleSpread evolves slowly with morphShape, making it completely change silhouette
+            const angleSpread = 0.55 + mp * 0.6 + morphShape * 0.4 + Math.sin(time * 1.0) * 0.2; 
+            const lengthShrink = 0.7 + tp * 0.2 + globalBreath * 0.1; // branches grow and shrink
+            
             const paths = Array.from({ length: maxDepth + 1 }, () => new Path2D());
             
             const drawBranch = (x: number, y: number, len: number, angle: number, depth: number) => {
               if (depth > maxDepth) return;
-              const ex = x + Math.cos(angle) * len;
-              const ey = y + Math.sin(angle) * len;
+              
+              // Apply majestic spiral torsion (twists more at higher depths)
+              const twistedAngle = angle + torsion * (depth / maxDepth);
+              
+              const ex = x + Math.cos(twistedAngle) * len;
+              const ey = y + Math.sin(twistedAngle) * len;
+              
               paths[depth].moveTo(x, y);
-              paths[depth].lineTo(ex, ey);
+              
+              // Organic curves instead of straight rigid lines!
+              // The control point sweeps out to the side depending on torsion and time
+              const cpAngle = twistedAngle + morphShape * 1.5;
+              const cpLen = len * (0.4 + Math.abs(morphShape) * 0.6);
+              const cpx = x + Math.cos(cpAngle) * cpLen;
+              const cpy = y + Math.sin(cpAngle) * cpLen;
+              
+              paths[depth].quadraticCurveTo(cpx, cpy, ex, ey);
+              
               const spread = angleSpread + (depth % 2 === 0 ? bp * 0.1 : -bp * 0.1);
-              drawBranch(ex, ey, len * lengthShrink, angle - spread, depth + 1);
-              drawBranch(ex, ey, len * lengthShrink, angle + spread, depth + 1);
+              drawBranch(ex, ey, len * lengthShrink, twistedAngle - spread, depth + 1);
+              drawBranch(ex, ey, len * lengthShrink, twistedAngle + spread, depth + 1);
             };
             
-            const startLen = minD * 0.18 * (1 + bp * 0.4 + Math.sin(time) * 0.05);
+            const startLen = minD * 0.18 * (1 + globalBreath) * (1 + bp * 0.4 + Math.sin(time) * 0.05);
             const rot = time * 0.25 + bp * 0.25; // Slower rotation
             for (let i = 0; i < roots; i++) {
                drawBranch(0, 0, startLen, rot + (i * Math.PI * 2) / roots, 0);
@@ -1026,11 +1065,22 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
           (alpha) => {
              ctx.globalAlpha = alpha;
              const maxD = 3; 
-             const rx = time * 0.5 + bp * 0.3; 
-             const ry = time * 0.35 + mp * 0.4;
              
-             // 3D to 2D projection
-             const project = (x: number, y: number, z: number) => {
+             // Organic macro evolutions (Dramatically accelerated and amplified for obvious aspect changing)
+             const globalBreath = Math.cos(time * 0.4) * 0.6; // Breathing scale faster and deeper
+             const morphTorsion = Math.sin(time * 0.6) * 1.8; // Spatial warping much faster and wilder
+             const morphSpread = Math.cos(time * 0.5) * 1.5; // Changes the explosion angle drastically
+             
+             const rx = time * 0.5 + bp * 0.3 + morphTorsion; 
+             const ry = time * 0.35 + mp * 0.4 - morphTorsion;
+             
+             // 3D to 2D projection with organic spatial warping
+             const project = (x: number, y: number, z: number, depth: number) => {
+                 // Organic twist in 3D space! The cubes bend like gelatin based on time
+                 const twist = Math.sin(time * 0.15 + (x + y) * 0.005) * morphTorsion * 80 * (depth + 1);
+                 x += twist;
+                 y -= twist;
+                 
                  let x1 = x * Math.cos(ry) - z * Math.sin(ry);
                  let z1 = x * Math.sin(ry) + z * Math.cos(ry);
                  let y2 = y * Math.cos(rx) - z1 * Math.sin(rx);
@@ -1044,30 +1094,47 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                 const pts = [
                    [-1,-1,-1], [1,-1,-1], [1,1,-1], [-1,1,-1],
                    [-1,-1,1], [1,-1,1], [1,1,1], [-1,1,1]
-                ].map(p => project(cx + p[0]*s, cy + p[1]*s, cz + p[2]*s));
+                ].map(p => project(cx + p[0]*s, cy + p[1]*s, cz + p[2]*s, depth));
                 
                 ctx.beginPath();
+                // Organic bending curves instead of straight rigid lines!
                 [[0,1],[1,2],[2,3],[3,0], [4,5],[5,6],[6,7],[7,4], [0,4],[1,5],[2,6],[3,7]].forEach(e => {
-                   ctx.moveTo(pts[e[0]][0], pts[e[0]][1]);
-                   ctx.lineTo(pts[e[1]][0], pts[e[1]][1]);
+                   const p1 = pts[e[0]];
+                   const p2 = pts[e[1]];
+                   ctx.moveTo(p1[0], p1[1]);
+                   // Curve bends dynamically using morphTorsion
+                   const bendX = (p2[1] - p1[1]) * morphTorsion * 0.4;
+                   const bendY = -(p2[0] - p1[0]) * morphTorsion * 0.4;
+                   ctx.quadraticCurveTo(
+                       (p1[0] + p2[0]) / 2 + bendX, 
+                       (p1[1] + p2[1]) / 2 + bendY, 
+                       p2[0], p2[1]
+                   );
                 });
                 
-                const hue = dynHue(BH + depth * 45);
+                const hue = dynHue(BH + depth * 45 + time * 10);
                 ctx.strokeStyle = `hsla(${hue}, 100%, ${60 + tp*30}%, ${alpha * (1 - depth/maxD + bp*0.5)})`;
-                ctx.lineWidth = 1.5 + bp*2;
+                ctx.lineWidth = 1.5 + bp*2 + (maxD - depth) * 0.5;
                 ctx.stroke();
                 
-                // Recurse at specific outer corners (Reduced to 3 corners to lower density)
+                // Recurse with evolving explosion distances and morphing corner targets
                 if (depth < maxD) {
-                    const ns = s * (0.45 + tp * 0.1);
-                    const dist = s * (1.5 + bp * 0.4); // Explode outwards
-                    [[-1,-1,-1], [1,1,-1], [-1,1,1]].forEach(p => {
+                    const ns = s * (0.45 + tp * 0.1 + globalBreath * 0.15); // Children cubes breathe
+                    const dist = s * (1.5 + bp * 0.4 + Math.abs(morphSpread) * 0.5); // Explosion breathes
+                    
+                    // The corners that spawn children mutate organically over time
+                    const spawnCorners = [
+                       [-1 + morphSpread * 0.5, -1, -1], 
+                       [1, 1 - morphSpread * 0.5, -1], 
+                       [-1, 1, 1 + morphSpread * 0.5]
+                    ];
+                    spawnCorners.forEach(p => {
                        drawBox(cx + p[0]*dist, cy + p[1]*dist, cz + p[2]*dist, ns, depth+1);
                     });
                 }
              };
              // Large initial box
-             drawBox(0, 0, 0, minD * 0.4 * (1 + bp * 0.3), 0);
+             drawBox(0, 0, 0, minD * 0.4 * (1 + globalBreath) * (1 + bp * 0.3), 0);
           },
 
           // 5. Water Molecules (Organic Metaball/Network)
@@ -1238,7 +1305,7 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
             const diag = Math.sqrt(w * w + h * h) / 2;
             const originalMaxR = minD * 0.46;
             const maxR = diag;
-            const seeds = Math.min(Math.floor(600 * (diag * diag) / (originalMaxR * originalMaxR)), 2000); // Cap to 2000 for performance
+            const seeds = Math.min(Math.floor(300 * (diag * diag) / (originalMaxR * originalMaxR)), 1000); // Cap to 1000 for performance (removed 1000 seeds)
             const phase2 = time * 0.6;
 
             // 1. Cosmic Dust (Parallax Background) - Batched for performance
@@ -1373,7 +1440,11 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                  const rot = angle + time * (1 + tp * 2); 
                  ctx.moveTo(px + Math.cos(rot) * size * 1.5, py + Math.sin(rot) * size * 1.5);
                  ctx.lineTo(px + Math.cos(rot + Math.PI/2) * size * 0.5, py + Math.sin(rot + Math.PI/2) * size * 0.5);
-                 ctx.lineTo(px + Math.cos(rot + Math.PI) * size * 1.5, py + Math.sin(rot + Math.PI) * size * 1.5);
+                 
+                 // Elongate the tail in the opposite direction of rotation (simulating comets/trails!)
+                 const trailLengthMultiplier = r > originalMaxR * (0.8 - bp * 0.2) ? (1.5 + tp * 6.0 + bp * 2.0) : 1.5;
+                 ctx.lineTo(px - Math.cos(rot) * size * trailLengthMultiplier, py - Math.sin(rot) * size * trailLengthMultiplier);
+                 
                  ctx.lineTo(px + Math.cos(rot - Math.PI/2) * size * 0.5, py + Math.sin(rot - Math.PI/2) * size * 0.5);
                  ctx.closePath();
               } else {
@@ -1384,20 +1455,6 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
               // OPACITY BOOSTS WITH BASS AND TREBLE
               ctx.fillStyle = `hsla(${hue}, 90%, 65%, ${(0.4 + bp * 0.4 + tp * 0.2) * alpha})`;
               ctx.fill();
-
-              // TRAILS PUSH INWARD AND GET LONGER WITH AUDIO
-              if (r > originalMaxR * (0.8 - bp * 0.2)) {
-                  const trailLength = 0.05 + tp * 0.4 + bp * 0.1;
-                  const trailAngle = angle - trailLength;
-                  const pxTrail = Math.cos(trailAngle) * r;
-                  const pyTrail = Math.sin(trailAngle) * r;
-                  ctx.beginPath();
-                  ctx.moveTo(px, py);
-                  ctx.lineTo(pxTrail, pyTrail);
-                  ctx.strokeStyle = `hsla(${hue}, 90%, 65%, ${(0.2 + tp * 0.3) * alpha})`;
-                  ctx.lineWidth = size * 0.5;
-                  ctx.stroke();
-              }
             }
             ctx.globalCompositeOperation = "source-over";
           },
@@ -1473,7 +1530,9 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
               const travelProgress = travelIndex / 8;
               
               // Exponential/linear expansion for natural depth perception (camera travel!)
-              const currentScale = 0.05 + 0.90 * travelProgress;
+              // + Global slow evolution: The entire flower breathes inward and outward over long periods
+              const globalBreath = Math.cos(T * 0.03 + li * 0.1) * 0.35; 
+              const currentScale = Math.max(0.01, (0.05 + 0.90 * travelProgress) * (1.0 + globalBreath));
               
               // Fade-in when emerging from the center, fade-out when exiting at the screen edge
               let fade = 1.0;
@@ -1485,7 +1544,10 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
 
               const iR    = D * currentScale * (1 + bp * 0.30);
               const oR    = D * currentScale * 1.5 * (1 + bp * 0.24) + D * 0.03 * mp;
-              const bHalf = iR * 0.40;
+              
+              // Slow macro-morphing factors so the fractal shape evolves organically over time
+              const morphMacro = Math.sin(T * 0.1 + li * 0.8);
+              const bHalf = iR * (0.35 + morphMacro * 0.15); // Petal base width fluctuates
               const tipEx = D * 0.04 * tp * Math.abs(Math.sin(mandalaRot * 15 + li));
               const step  = TAU / spokes;
 
@@ -1499,15 +1561,28 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                 ctx.rotate(s * step);
 
                 // Elegant Bezier-curved lotus/flame petal shape
+                // Adding organic breathing dynamism based on time (T) and petal index (s)
+                const breath = Math.sin(T * 2.5 + s * 0.5 + li) * 0.15; 
+                const breathW = Math.cos(T * 1.8 + s * 0.3) * 0.08;
+                const tipDynamic = tipEx + Math.sin(T * 3.5 + s * 0.8) * (oR * 0.03);
+                
+                // Slow organic morphing of the petal's silhouette
+                const morphShapeY = 1.8 + Math.cos(T * 0.15 + li * 0.5) * 0.7; // oscillates the bulbousness
+                
+                // TORSION EVOLUTION: Asymmetric skewing that turns petals into curved spiral arms
+                const torsion = Math.sin(T * 0.07 + li * 0.4) * 1.6; // Very slow, majestic twisting
+                const skew = torsion * bHalf; 
+
                 ctx.beginPath();
                 ctx.moveTo(iR, -bHalf);
-                // Control points for the outer curve (bloom reacts to treble tp)
-                const cpX = iR + (oR - iR) * 0.45;
-                const cpY1 = -bHalf * (1.8 + tp * 1.5);
-                const cpY2 = bHalf * (1.8 + tp * 1.5);
-                ctx.quadraticCurveTo(cpX, cpY1, oR + tipEx, 0);
+                // Control points for the outer curve (bloom reacts to treble tp + dynamic breath + morph)
+                const cpX = iR + (oR - iR) * (0.45 + breathW + bp * 0.05);
+                const cpY1 = -bHalf * (morphShapeY + tp * 1.5 + breath) + skew;
+                const cpY2 = bHalf * (morphShapeY + tp * 1.5 + breath) + skew;
+                
+                ctx.quadraticCurveTo(cpX, cpY1, oR + tipDynamic, skew * 1.3); // The tip shifts sideways
                 ctx.quadraticCurveTo(cpX, cpY2, iR, bHalf);
-                ctx.quadraticCurveTo(iR * 0.8, 0, iR, -bHalf);
+                ctx.quadraticCurveTo(iR * (0.8 + breathW * 0.5), skew * 0.5, iR, -bHalf);
                 ctx.closePath();
 
                 // Multi-color linear gradient along the petal body (scaled by travel fade)

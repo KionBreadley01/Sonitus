@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { Upload, Play, Pause, SkipBack, SkipForward, Music2, Volume2, ListMusic, Maximize2, Minimize2, Eye, EyeOff, X, Trash2, Menu, Search, ChevronDown, Heart, Download } from "lucide-react";
+import { Upload, Play, Pause, SkipBack, SkipForward, Music2, Volume2, ListMusic, Maximize2, Minimize2, Eye, EyeOff, X, Trash2, Menu, Search, ChevronDown, Heart, Download, TriangleAlert, Check, CheckSquare, Square } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Visualizer, VisualMode } from "@/components/Visualizer";
 import { cn } from "@/lib/utils";
 import { get, set } from "idb-keyval";
@@ -41,6 +42,8 @@ const Index = () => {
   const restoredTimeRef = useRef<number>(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [fractalOverride, setFractalOverride] = useState<number | null>(null);
+  const [autoFractalIndex, setAutoFractalIndex] = useState<number>(0);
+  const [allowedFractals, setAllowedFractals] = useState<Set<number>>(new Set([0,1,2,3,4,5,6,7,8]));
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [sidebarTab, setSidebarTab] = useState<"all" | "favorites">("all");
   const [installPrompt, setInstallPrompt] = useState<any>(null);
@@ -313,9 +316,8 @@ const Index = () => {
 
   return (
     <div ref={containerRef} className="min-h-screen w-full overflow-hidden relative flex text-foreground" style={{ background: "var(--gradient-bg)" }}>
-      {/* Visualizer canvas */}
       <div className={cn("absolute inset-0 transition-opacity duration-1000 pointer-events-none z-0", showVisualizer ? "opacity-100" : "opacity-0")}>
-        <Visualizer analyser={analyserRef.current} mode={mode} playing={playing} fractalOverride={fractalOverride} />
+        <Visualizer analyser={analyserRef.current} mode={mode} playing={playing} fractalOverride={fractalOverride} onFractalChange={setAutoFractalIndex} allowedFractals={Array.from(allowedFractals)} />
       </div>
 
       {/* Main Content Area */}
@@ -332,7 +334,26 @@ const Index = () => {
               alt="Sonitus Logo" 
               className="w-10 h-10 rounded-xl shadow-lg object-cover" 
             />
-            <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md">SONITUS</h1>
+            <div className="flex flex-col justify-center">
+              <h1 className="text-xl font-bold tracking-tight text-white drop-shadow-md leading-none mt-1">SONITUS</h1>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button className="text-[9px] text-white/40 hover:text-white transition-colors uppercase tracking-widest text-left mt-1.5 outline-none">
+                    Powered by E.M.I
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md bg-background/95 backdrop-blur-xl border-foreground/10 text-foreground p-6">
+                  <DialogHeader>
+                    <DialogTitle className="text-white text-lg font-bold tracking-wide">
+                      E.M.I Core
+                    </DialogTitle>
+                  </DialogHeader>
+                  <DialogDescription className="text-foreground/70 leading-relaxed text-sm mt-2">
+                    Sistema experimental de mutación fractal audio-reactiva en tiempo real.
+                  </DialogDescription>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
 
           {/* Right: Controls - Conditional Visibility */}
@@ -348,6 +369,30 @@ const Index = () => {
                 <span className="hidden sm:inline">Instalar</span>
               </button>
             )}
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="icon" title="Advertencia Médica" className="text-amber-400 hover:text-amber-300 hover:bg-amber-400/10 z-[70] hidden sm:flex w-12 h-12">
+                  <TriangleAlert className="w-7 h-7" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-xl bg-background/95 backdrop-blur-xl border-foreground/10 text-foreground p-8">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-3 text-amber-500 text-2xl pb-2">
+                    <TriangleAlert className="w-8 h-8" /> Advertencia de Fotosensibilidad
+                  </DialogTitle>
+                </DialogHeader>
+                <DialogDescription className="text-foreground/80 leading-relaxed text-base mt-2">
+                  Ciertos patrones visuales, destellos de luces intermitentes y movimientos geométricos rápidos presentes en estos fractales pueden generar mareos, dolores de cabeza o provocar ataques en personas con epilepsia fotosensible.
+                  <br /><br />
+                  Si eres sensible a la luz o tienes antecedentes de este tipo, te recomendamos usar este visualizador con precaución, reducir el brillo de tu pantalla, o detener la reproducción en caso de sentir algún malestar.
+                </DialogDescription>
+              </DialogContent>
+            </Dialog>
+
+            <Button variant="ghost" size="icon" onClick={toggleFullscreen} title="Toggle Fullscreen" className="text-foreground/80 hover:text-white z-[70] hidden sm:flex">
+              {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </Button>
+
             <Button variant="ghost" size="icon" onClick={() => setShowUI(!showUI)} title={showUI ? "Ocultar Interfaz" : "Mostrar Interfaz"} className="text-foreground/80 hover:text-white z-[70]">
               {showUI ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </Button>
@@ -356,9 +401,6 @@ const Index = () => {
               "flex items-center gap-4 transition-all duration-500",
               !showUI && "opacity-0 pointer-events-none translate-x-10"
             )}>
-              <Button variant="ghost" size="icon" onClick={toggleFullscreen} title="Toggle Fullscreen" className="text-foreground/80 hover:text-white hidden sm:flex">
-                {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-              </Button>
               {/* Desktop mode selector */}
               <div className="hidden sm:flex gap-1 rounded-full border border-foreground/20 backdrop-blur-md bg-background/50 p-1">
                 {(["bars", "circle", "wave", "particles", "universe", "psycho", "arc3d", "fractal"] as VisualMode[]).map((m) => (
@@ -423,7 +465,13 @@ const Index = () => {
           )}>
             <div className="flex gap-1 p-1.5 bg-black/40 backdrop-blur-2xl border border-white/10 rounded-full pointer-events-auto shadow-2xl ring-1 ring-white/5">
               <button
-                onClick={() => setFractalOverride(null)}
+                onClick={() => {
+                  if (fractalOverride === null) {
+                    setFractalOverride(autoFractalIndex);
+                  } else {
+                    setFractalOverride(null);
+                  }
+                }}
                 className={cn(
                   "px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-full transition-all duration-300",
                   fractalOverride === null 
@@ -434,21 +482,71 @@ const Index = () => {
                 Auto
               </button>
               <div className="w-[1px] h-4 bg-white/10 self-center mx-1" />
-              {Array.from({ length: 9 }, (_, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setFractalOverride(idx)}
-                  className={cn(
-                    "w-9 h-9 flex items-center justify-center text-[11px] font-bold rounded-full transition-all duration-300 border",
-                    fractalOverride === idx 
-                      ? "bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.3)] scale-110 z-10" 
-                      : "text-white/50 hover:text-white hover:bg-white/10 border-transparent hover:border-white/10"
-                  )}
-                  title={`Fractal ${idx + 1}`}
-                >
-                  {idx + 1}
-                </button>
-              ))}
+              {Array.from({ length: 9 }, (_, idx) => {
+                const isAutoMode = fractalOverride === null;
+                const isAllowed = allowedFractals.has(idx);
+                const isActive = isAutoMode ? autoFractalIndex === idx : fractalOverride === idx;
+                
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      if (isAutoMode) {
+                        setAllowedFractals(prev => {
+                          const next = new Set(prev);
+                          if (next.has(idx)) {
+                            if (next.size > 1) next.delete(idx);
+                          } else {
+                            next.add(idx);
+                          }
+                          return next;
+                        });
+                      } else {
+                        setFractalOverride(idx);
+                      }
+                    }}
+                    className={cn(
+                      "relative w-9 h-9 flex items-center justify-center text-[11px] font-bold rounded-full transition-all duration-300 border",
+                      isActive 
+                        ? "bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.3)] scale-110 z-10" 
+                        : (isAutoMode && isAllowed 
+                            ? "bg-white/10 text-white border-white/20 hover:bg-white/20" 
+                            : "text-white/30 hover:text-white hover:bg-white/10 border-transparent hover:border-white/10")
+                    )}
+                    title={`Fractal ${idx + 1}`}
+                  >
+                    {isAutoMode && isAllowed && (
+                      <div className="absolute -top-1 -right-1 bg-green-500 rounded-full p-0.5 shadow-sm border border-black/50 z-20">
+                         <Check className="w-2 h-2 text-white" strokeWidth={4} />
+                      </div>
+                    )}
+                    {idx + 1}
+                  </button>
+                );
+              })}
+              {fractalOverride === null && (
+                <>
+                  <div className="w-[1px] h-4 bg-white/10 self-center mx-1" />
+                  <button
+                    onClick={() => {
+                      if (allowedFractals.size === 9) {
+                        setAllowedFractals(new Set([autoFractalIndex]));
+                      } else {
+                        setAllowedFractals(new Set([0,1,2,3,4,5,6,7,8]));
+                      }
+                    }}
+                    className={cn(
+                      "w-9 h-9 flex items-center justify-center rounded-full transition-all border",
+                      allowedFractals.size === 9 
+                        ? "text-white bg-white/10 border-white/20 hover:bg-white/20" 
+                        : "text-white/40 border-transparent hover:text-white hover:bg-white/10"
+                    )}
+                    title={allowedFractals.size === 9 ? "Deseleccionar todos" : "Seleccionar todos"}
+                  >
+                    {allowedFractals.size === 9 ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </>
+              )}
             </div>
             <p className="text-[9px] uppercase tracking-[0.2em] text-white/30 font-medium">Selector de Fractales</p>
           </div>
