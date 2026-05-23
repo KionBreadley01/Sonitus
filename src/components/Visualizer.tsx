@@ -1238,7 +1238,7 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
             const diag = Math.sqrt(w * w + h * h) / 2;
             const originalMaxR = minD * 0.46;
             const maxR = diag;
-            const seeds = Math.min(Math.floor(600 * (diag * diag) / (originalMaxR * originalMaxR)), 2000); // Cap to 2000 for performance
+            const seeds = Math.min(Math.floor(300 * (diag * diag) / (originalMaxR * originalMaxR)), 1000); // Cap to 1000 for performance (removed 1000 seeds)
             const phase2 = time * 0.6;
 
             // 1. Cosmic Dust (Parallax Background) - Batched for performance
@@ -1373,7 +1373,11 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                  const rot = angle + time * (1 + tp * 2); 
                  ctx.moveTo(px + Math.cos(rot) * size * 1.5, py + Math.sin(rot) * size * 1.5);
                  ctx.lineTo(px + Math.cos(rot + Math.PI/2) * size * 0.5, py + Math.sin(rot + Math.PI/2) * size * 0.5);
-                 ctx.lineTo(px + Math.cos(rot + Math.PI) * size * 1.5, py + Math.sin(rot + Math.PI) * size * 1.5);
+                 
+                 // Elongate the tail in the opposite direction of rotation (simulating comets/trails!)
+                 const trailLengthMultiplier = r > originalMaxR * (0.8 - bp * 0.2) ? (1.5 + tp * 6.0 + bp * 2.0) : 1.5;
+                 ctx.lineTo(px - Math.cos(rot) * size * trailLengthMultiplier, py - Math.sin(rot) * size * trailLengthMultiplier);
+                 
                  ctx.lineTo(px + Math.cos(rot - Math.PI/2) * size * 0.5, py + Math.sin(rot - Math.PI/2) * size * 0.5);
                  ctx.closePath();
               } else {
@@ -1384,20 +1388,6 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
               // OPACITY BOOSTS WITH BASS AND TREBLE
               ctx.fillStyle = `hsla(${hue}, 90%, 65%, ${(0.4 + bp * 0.4 + tp * 0.2) * alpha})`;
               ctx.fill();
-
-              // TRAILS PUSH INWARD AND GET LONGER WITH AUDIO
-              if (r > originalMaxR * (0.8 - bp * 0.2)) {
-                  const trailLength = 0.05 + tp * 0.4 + bp * 0.1;
-                  const trailAngle = angle - trailLength;
-                  const pxTrail = Math.cos(trailAngle) * r;
-                  const pyTrail = Math.sin(trailAngle) * r;
-                  ctx.beginPath();
-                  ctx.moveTo(px, py);
-                  ctx.lineTo(pxTrail, pyTrail);
-                  ctx.strokeStyle = `hsla(${hue}, 90%, 65%, ${(0.2 + tp * 0.3) * alpha})`;
-                  ctx.lineWidth = size * 0.5;
-                  ctx.stroke();
-              }
             }
             ctx.globalCompositeOperation = "source-over";
           },
