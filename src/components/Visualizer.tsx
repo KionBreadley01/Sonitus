@@ -7,6 +7,8 @@ interface Props {
   mode: VisualMode;
   playing: boolean;
   fractalOverride?: number | null;
+  onFractalChange?: (index: number) => void;
+  allowedFractals?: number[];
 }
 
 class Particle {
@@ -39,7 +41,7 @@ const avg = (a: Uint8Array, s: number, e: number) => {
   return sum / (end - s);
 };
 
-export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) => {
+export const Visualizer = ({ analyser, mode, playing, fractalOverride, onFractalChange, allowedFractals }: Props) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>();
   const particlesRef = useRef<Particle[]>([]);
@@ -59,12 +61,17 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
   const playingRef = useRef(playing);
   const analyserRef = useRef(analyser);
   const fractalOverrideRef = useRef(fractalOverride);
+  const onFractalChangeRef = useRef(onFractalChange);
+  const allowedFractalsRef = useRef(allowedFractals || [0,1,2,3,4,5,6,7,8]);
+  const lastReportedFractalRef = useRef<number | null>(null);
 
   // Keep refs in sync with props on every render
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { playingRef.current = playing; }, [playing]);
   useEffect(() => { analyserRef.current = analyser; }, [analyser]);
   useEffect(() => { fractalOverrideRef.current = fractalOverride ?? null; }, [fractalOverride]);
+  useEffect(() => { onFractalChangeRef.current = onFractalChange; }, [onFractalChange]);
+  useEffect(() => { allowedFractalsRef.current = allowedFractals && allowedFractals.length > 0 ? allowedFractals : [0,1,2,3,4,5,6,7,8]; }, [allowedFractals]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -820,9 +827,10 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
              return x - Math.floor(x);
         };
         
-        // Pick the current and next fractal randomly
-        let currentFractal = Math.floor(hash(currentCycleId) * totalFractals);
-        let nextFractal = Math.floor(hash(nextCycleId) * totalFractals);
+        // Pick the current and next fractal randomly from the allowed list
+        const allowed = allowedFractalsRef.current;
+        let currentFractal = allowed[Math.floor(hash(currentCycleId) * allowed.length)];
+        let nextFractal = allowed[Math.floor(hash(nextCycleId) * allowed.length)];
         
         // Crossfade logic: fade during the last 20% of the cycle
         let alphaCurrent = 1;
@@ -837,6 +845,14 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
                const crossfade = (progress - 0.8) / 0.2; // 0.0 to 1.0
                alphaCurrent = 1 - crossfade;
                alphaNext = crossfade;
+          }
+        }
+
+        // Report the current auto fractal to the UI
+        if ((fractalOverride === undefined || fractalOverride === null) && lastReportedFractalRef.current !== currentFractal) {
+          lastReportedFractalRef.current = currentFractal;
+          if (onFractalChangeRef.current) {
+             onFractalChangeRef.current(currentFractal);
           }
         }
 
