@@ -846,24 +846,47 @@ export const Visualizer = ({ analyser, mode, playing, fractalOverride }: Props) 
           // 1. Recursive Fractal Trees (Optimized)
           (alpha) => {
             ctx.globalAlpha = alpha;
-            const roots = 12; // Increased to 12 for many more petals
+            
+            // Organic evolutions inspired by Fractal 9
+            const globalBreath = Math.cos(time * 0.035) * 0.35; // Global scaling over time
+            const morphShape = Math.sin(time * 0.07) * 0.9; // Alters the branching structure heavily
+            const torsion = Math.sin(time * 0.05) * 1.5; // Spiral twisting
+
+            const roots = 6; // Reduced petal density for a cleaner look
             const maxDepth = 7; 
-            const angleSpread = 0.55 + mp * 0.6 + Math.sin(time * 1.0) * 0.2; // Softer spread
-            const lengthShrink = 0.7 + tp * 0.2; // Softer branches
+            
+            // angleSpread evolves slowly with morphShape, making it completely change silhouette
+            const angleSpread = 0.55 + mp * 0.6 + morphShape * 0.4 + Math.sin(time * 1.0) * 0.2; 
+            const lengthShrink = 0.7 + tp * 0.2 + globalBreath * 0.1; // branches grow and shrink
+            
             const paths = Array.from({ length: maxDepth + 1 }, () => new Path2D());
             
             const drawBranch = (x: number, y: number, len: number, angle: number, depth: number) => {
               if (depth > maxDepth) return;
-              const ex = x + Math.cos(angle) * len;
-              const ey = y + Math.sin(angle) * len;
+              
+              // Apply majestic spiral torsion (twists more at higher depths)
+              const twistedAngle = angle + torsion * (depth / maxDepth);
+              
+              const ex = x + Math.cos(twistedAngle) * len;
+              const ey = y + Math.sin(twistedAngle) * len;
+              
               paths[depth].moveTo(x, y);
-              paths[depth].lineTo(ex, ey);
+              
+              // Organic curves instead of straight rigid lines!
+              // The control point sweeps out to the side depending on torsion and time
+              const cpAngle = twistedAngle + morphShape * 1.5;
+              const cpLen = len * (0.4 + Math.abs(morphShape) * 0.6);
+              const cpx = x + Math.cos(cpAngle) * cpLen;
+              const cpy = y + Math.sin(cpAngle) * cpLen;
+              
+              paths[depth].quadraticCurveTo(cpx, cpy, ex, ey);
+              
               const spread = angleSpread + (depth % 2 === 0 ? bp * 0.1 : -bp * 0.1);
-              drawBranch(ex, ey, len * lengthShrink, angle - spread, depth + 1);
-              drawBranch(ex, ey, len * lengthShrink, angle + spread, depth + 1);
+              drawBranch(ex, ey, len * lengthShrink, twistedAngle - spread, depth + 1);
+              drawBranch(ex, ey, len * lengthShrink, twistedAngle + spread, depth + 1);
             };
             
-            const startLen = minD * 0.18 * (1 + bp * 0.4 + Math.sin(time) * 0.05);
+            const startLen = minD * 0.18 * (1 + globalBreath) * (1 + bp * 0.4 + Math.sin(time) * 0.05);
             const rot = time * 0.25 + bp * 0.25; // Slower rotation
             for (let i = 0; i < roots; i++) {
                drawBranch(0, 0, startLen, rot + (i * Math.PI * 2) / roots, 0);
